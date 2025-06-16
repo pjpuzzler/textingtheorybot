@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "name": "textingtheorybot",
+  "version": "0.0.0",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "dependencies": {
+    "@devvit/public-api": "latest",
+    "@google/genai": "latest",
+    "@pinecone-database/pinecone": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "5.8.3"
+  }
+}
