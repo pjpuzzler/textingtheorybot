@@ -600,9 +600,8 @@ function buildReviewComment(
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
             text:
-              analysis.color.left && analysis.elo.left
-                ? `${analysis.color.left.label} (${analysis.elo.left})`
-                : "",
+              analysis.color.left!.label +
+              (analysis.elo.left ? ` (${analysis.elo.left})` : ""),
           })
         );
       table.headerCell({ columnAlignment: "center" }, () => {});
@@ -610,9 +609,8 @@ function buildReviewComment(
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
             text:
-              analysis.color.right && analysis.elo.right
-                ? `${analysis.color.right.label} (${analysis.elo.right})`
-                : "",
+              analysis.color.right!.label +
+              (analysis.elo.right ? ` (${analysis.elo.right})` : ""),
           })
         );
 
