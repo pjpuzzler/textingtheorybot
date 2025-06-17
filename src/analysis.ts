@@ -61,7 +61,7 @@ export type ColorBlock = {
 
 export type Analysis = {
   messages: Message[];
-  elo: EloBlock;
+  elo?: EloBlock;
   color: ColorBlock;
   opening_name: string;
   commentary: string;
