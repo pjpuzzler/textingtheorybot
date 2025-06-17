@@ -5,7 +5,7 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "dependencies": {
-    "@devvit/public-api": "latest",
+    "@devvit/public-api": "^0.11.17",
     "@google/genai": "latest",
     "@pinecone-database/pinecone": "latest"
   },

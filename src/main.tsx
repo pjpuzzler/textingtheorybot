@@ -23,14 +23,16 @@ const INITIAL_ELO = 1000;
 const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
 const ELO_VOTE_TOLERANCE = 300;
-const MIN_VOTES_FOR_FLAIR = 3;
+const MIN_VOTES_FOR_FLAIR = 2;
 const MIN_KARMA_TO_VOTE = 25;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const REQUESTING_ANNOTATION_TEMPLATE_ID =
-  "3ec9d0fe-34a9-11ee-9daf-baddd55b2a7c";
-const REQUESTING_ANNOTATION_PLUS_ELO_TEMPLATE_ID =
-  "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a";
+const ELO_VOTE_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a";
+const NO_ANALYSIS_FLAIR_IDS = [
+  "c2d007e7-ca1c-11eb-bc34-0e56c289897d", // already annotated
+  "edde53c6-7cb1-11ee-8104-3e49ebced071", // meta
+  "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf", // announcement
+];
 
 const POST_DATA_PREFIX = "post_data:";
 const VOTERS_PREFIX = "voters:";
@@ -271,6 +273,27 @@ Devvit.addMenuItem({
   },
 });
 
+// Devvit.addMenuItem({
+//   label: "Force Analysis",
+//   location: "post",
+//   onPress: async (event, context) => {
+//     const { targetId } = event;
+//     const { reddit, ui, userId } = context;
+
+//     if (
+//       !userId ||
+//       (await reddit.getUserById(userId))?.username !== "pjpuzzler"
+//     ) {
+//       ui.showToast("Error: not allowed");
+//       return;
+//     }
+
+//     const post = await reddit.getPostById(targetId);
+
+//     await runAnalysis(post, context);
+//   },
+// });
+
 Devvit.addSchedulerJob({
   name: "comment_analysis",
   onRun: async (event, context) => {
@@ -314,12 +337,11 @@ Devvit.addTrigger({
     const { post } = event;
     const { redis, reddit, scheduler } = context;
 
+    if (!post) return;
+
     if (
-      !post ||
-      !post.linkFlair ||
-      (post.linkFlair.templateId !== REQUESTING_ANNOTATION_TEMPLATE_ID &&
-        post.linkFlair.templateId !==
-          REQUESTING_ANNOTATION_PLUS_ELO_TEMPLATE_ID)
+      post.linkFlair &&
+      NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
     )
       return;
 
@@ -434,7 +456,7 @@ Devvit.addTrigger({
         ]),
       ],
       config: {
-        temperature: 0.3,
+        temperature: 0.7,
         systemInstruction: SYSTEM_PROMPT,
         responseMimeType: "application/json",
         safetySettings: [
@@ -497,9 +519,7 @@ Devvit.addTrigger({
 
     normalizeClassifications(analysis);
 
-    if (
-      post.linkFlair?.templateId === REQUESTING_ANNOTATION_PLUS_ELO_TEMPLATE_ID
-    ) {
+    if (post.linkFlair?.templateId === ELO_VOTE_FLAIR_ID) {
       console.log(
         `[${post.id}] Votable flair detected. Removing Gemini Elo from analysis object.`
       );
@@ -534,10 +554,7 @@ Devvit.addTrigger({
 
     if (!post || !comment || !author) return;
 
-    if (
-      post.linkFlair?.templateId !== REQUESTING_ANNOTATION_PLUS_ELO_TEMPLATE_ID
-    )
-      return;
+    if (post.linkFlair?.templateId !== ELO_VOTE_FLAIR_ID) return;
 
     const voteCommandRegex = /!elo\s+(-?\d+)\b/i;
     const match = comment.body.match(voteCommandRegex);
@@ -665,7 +682,7 @@ async function handleEloVote(
     try {
       const post = await reddit.getPostById(postId);
       await reddit.setPostFlair({
-        flairTemplateId: REQUESTING_ANNOTATION_PLUS_ELO_TEMPLATE_ID,
+        flairTemplateId: ELO_VOTE_FLAIR_ID,
         postId: postId,
         subredditName: post.subredditName,
         text: flairText,
@@ -715,10 +732,20 @@ function buildReviewComment(
 
   const aboutBotLink = `https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/`;
   return new RichTextBuilder()
-    .paragraph((p) => p.text({ text: "✪ Game Review" }))
+    .paragraph((p) =>
+      p.text({
+        text: "✪ Game Review",
+        formatting: [[1, 0, 13]],
+      })
+    )
     .paragraph((p) => p.text({ text: analysis.commentary }))
     .image({ mediaId })
-    .paragraph((p) => p.text({ text: analysis.opening_name }))
+    .paragraph((p) =>
+      p.text({
+        text: analysis.opening_name,
+        formatting: [[2, 0, analysis.opening_name.length]],
+      })
+    )
     .table((table) => {
       if (hasLeft)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
@@ -754,7 +781,18 @@ function buildReviewComment(
         });
       });
     })
-    .paragraph((p) => p.link({ text: "about the bot", url: aboutBotLink }));
+    .paragraph((p) =>
+      p
+        .text({
+          text: "This bot is designed for comedy/entertainment only. It's analyses should not be taken seriously. ",
+          formatting: [[32, 0, 97]],
+        })
+        .link({
+          text: "about the bot",
+          formatting: [[32, 0, 13]],
+          url: aboutBotLink,
+        })
+    );
 }
 
 function buildAnnotateComment(

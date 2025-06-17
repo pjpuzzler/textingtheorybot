@@ -10,5 +10,6 @@ This Devvit app analyzes images of text conversations posted on r/TextingTheory.
 4.  **Final Comment:** The app picks up the rendered image and posts a full review comment to the original thread.
 
 Also adds a menu item to submit your own custom analysis if the bot didn't get it quite right.
+And allows for users to use !elo to vote on Elo for appropriately flaired posts.
 
 See it in action here (be warned, possible NSFW text messages): https://www.reddit.com/user/textingtheorybot/
