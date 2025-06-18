@@ -10,6 +10,7 @@ import {
   createUserContent,
   HarmCategory,
   HarmBlockThreshold,
+  Type,
 } from "@google/genai";
 import { SYSTEM_PROMPT } from "./systemPrompt.js";
 import {
@@ -68,6 +69,142 @@ const FILENAME_ANNOTATE_PREFIX = "render_result_annotate";
 const RENDER_WAIT = 30000;
 
 let ai: GoogleGenAI | undefined;
+
+function getGeminiConfig() {
+  const dayOfWeek = new Date().toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    weekday: "long",
+  });
+
+  const validClassifications = Object.values(Classification).filter(
+    (c) =>
+      (c !== Classification.SUPERBRILLIANT &&
+        c !== Classification.MEGABLUNDER) ||
+      (c === Classification.SUPERBRILLIANT && dayOfWeek === "Saturday") ||
+      (c === Classification.MEGABLUNDER && dayOfWeek === "Monday")
+  );
+
+  const SUPERBRILLIANT_TEXT = `\`Superbrilliant\` (0.1% rarity) An absolutely god-like find, perfection. Someone can try for years and never get a classification this good. (Only available because today is Saturday).`;
+  const MEGABLUNDER_TEXT = `\`Megablunder\` (5% rarity) No coming back from this. The worst of the worst. (Only available because today is Monday).`;
+
+  let finalSystemPrompt = SYSTEM_PROMPT.replace(
+    "// ANCHOR_FOR_SUPERBRILLIANT",
+    dayOfWeek === "Saturday" ? SUPERBRILLIANT_TEXT : ""
+  ).replace(
+    "// ANCHOR_FOR_MEGABLUNDER",
+    dayOfWeek === "Monday" ? MEGABLUNDER_TEXT : ""
+  );
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      messages: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            side: { type: Type.STRING, enum: ["left", "right"] },
+            content: { type: Type.STRING },
+            classification: {
+              type: Type.STRING,
+              enum: validClassifications,
+            },
+            unsent: { type: Type.BOOLEAN, nullable: true },
+          },
+          required: ["side", "content", "classification"],
+        },
+      },
+      elo: {
+        type: Type.OBJECT,
+        description: "Estimated Elo ratings for the players.",
+        nullable: true, // The whole elo block is optional
+        properties: {
+          left: {
+            type: Type.NUMBER,
+            description: `Estimated Elo (integer) for the "left" player.`,
+            nullable: true,
+          },
+          right: {
+            type: Type.NUMBER,
+            description: `Estimated Elo (integer) for the "right" player.`,
+            nullable: true,
+          },
+        },
+      },
+      color: {
+        type: Type.OBJECT,
+        description: "Color theme for the chat display.",
+        properties: {
+          left: {
+            type: Type.OBJECT,
+            description: `Color info for the "left" player. Omit if no messages from "left".`,
+            nullable: true,
+            properties: {
+              label: {
+                type: Type.STRING,
+                description: `Simple, one-word color name (e.g., "Gray")`,
+              },
+              bubble_hex: {
+                type: Type.STRING,
+                description: "Hex code for the message bubble.",
+              },
+              text_hex: {
+                type: Type.STRING,
+                description: "Hex code for the text color.",
+              },
+            },
+            required: ["label", "bubble_hex", "text_hex"],
+          },
+          right: {
+            type: Type.OBJECT,
+            description: `Color info for the "right" player. Omit if no messages from "right".`,
+            nullable: true,
+            properties: {
+              label: {
+                type: Type.STRING,
+                description: `Simple, one-word color name (e.g., "Purple")`,
+              },
+              bubble_hex: {
+                type: Type.STRING,
+                description: "Hex code for the message bubble.",
+              },
+              text_hex: {
+                type: Type.STRING,
+                description: "Hex code for the text color.",
+              },
+            },
+            required: ["label", "bubble_hex", "text_hex"],
+          },
+          background_hex: {
+            type: Type.STRING,
+            description: "Hex code for the overall chat background.",
+          },
+        },
+        required: ["background_hex"],
+      },
+      opening_name: {
+        type: Type.STRING,
+        description: "A creative opening name for the conversation.",
+      },
+      commentary: {
+        type: Type.STRING,
+        description: "A one-sentence commentary on the game or conversation.",
+      },
+      not_analyzable: {
+        type: Type.BOOLEAN,
+        description:
+          "true only if the input image(s) are not a conversation. Omit otherwise.",
+        nullable: true,
+      },
+    },
+    required: ["messages", "color", "opening_name", "commentary"],
+  };
+
+  return {
+    systemInstruction: finalSystemPrompt,
+    responseSchema: responseSchema,
+  };
+}
 
 function formatDateAsPath(date: Date): string {
   const options: Intl.DateTimeFormatOptions = {
@@ -403,6 +540,7 @@ Devvit.addTrigger({
     );
 
     const geminiImageParts = [];
+
     try {
       const imageFetchPromises = imageUrls.map(async (url) => {
         const response = await fetch(url);
@@ -441,14 +579,16 @@ Devvit.addTrigger({
       return;
     }
 
+    const dynamicConfig = getGeminiConfig();
+
     const gemini = await getGemini(context);
 
     console.log(
-      `[${post.id}] Sending ${geminiImageParts.length} image(s) to Gemini.`
+      `[${post.id}] Sending ${geminiImageParts.length} image(s) to Gemini with a structured schema.`
     );
 
     const geminiResponse = await gemini.models.generateContent({
-      model: "gemini-2.5-flash-preview-05-20",
+      model: "gemini-2.5-flash",
       contents: [
         createUserContent([
           `Reddit Post Title: "${post.title}"\n\nReddit Post Body: "${post.selftext}"`,
@@ -456,8 +596,8 @@ Devvit.addTrigger({
         ]),
       ],
       config: {
-        temperature: 0.7,
-        systemInstruction: SYSTEM_PROMPT,
+        ...dynamicConfig,
+        temperature: 1.0,
         responseMimeType: "application/json",
         safetySettings: [
           {
@@ -495,9 +635,7 @@ Devvit.addTrigger({
 
     let analysis: Analysis;
     try {
-      analysis = JSON.parse(
-        geminiResponseText.replace(/```json\n?|```/g, "").trim()
-      );
+      analysis = JSON.parse(geminiResponseText);
     } catch (parseError) {
       console.error(
         `[${post.id}] Failed to parse Gemini JSON response: ${parseError}`,
@@ -784,7 +922,7 @@ function buildReviewComment(
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is designed for comedy/entertainment only. It's analyses should not be taken seriously. ",
+          text: "This bot is designed for comedy/entertainment only. Its reviews should not be taken seriously. ",
           formatting: [[32, 0, 97]],
         })
         .link({
