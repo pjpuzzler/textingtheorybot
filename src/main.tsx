@@ -3,7 +3,9 @@ import {
   TriggerContext,
   SettingScope,
   RichTextBuilder,
+  FlairTextColor,
 } from "@devvit/public-api";
+import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
 import {
   createPartFromBase64,
   GoogleGenAI,
@@ -19,25 +21,37 @@ import {
   CountedClassification,
   Message,
 } from "./analysis.js";
+import { getEloColor } from "./color.js";
 
-const INITIAL_ELO = 1000;
 const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
 const ELO_VOTE_TOLERANCE = 300;
-const MIN_VOTES_FOR_FLAIR = 2;
+const MIN_VOTES_FOR_FLAIR = 1;
 const MIN_KARMA_TO_VOTE = 25;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const ELO_VOTE_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a";
-const NO_ANALYSIS_FLAIR_IDS = [
-  "c2d007e7-ca1c-11eb-bc34-0e56c289897d", // already annotated
-  "edde53c6-7cb1-11ee-8104-3e49ebced071", // meta
-  "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf", // announcement
-];
+const TITLE_BRACKETS_REGEX = /^\[\S(.*\S)?\]/i;
+const TITLE_NO_VOTE_REGEX = /^\[no vote\]/i;
+const VOTE_COMMAND_REGEX = /!elo\s+(-?\d+)\b/i;
+
+const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
+  ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
+  MEGABLUNDER_MONDAY_FLAIR_ID = "a41e2978-4c76-11f0-a7d9-8a051a625ee6",
+  SUPERBRILLIANT_SATURDAY_FLAIR_ID = "b4df51ec-4c76-11f0-8011-568335338cf7",
+  META_FLAIR_ID = "edde53c6-7cb1-11ee-8104-3e49ebced071",
+  ANNOUNCEMENT_FLAIR_ID = "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf";
+const NO_ANALYSIS_FLAIR_IDS = [META_FLAIR_ID, ANNOUNCEMENT_FLAIR_ID];
 
 const POST_DATA_PREFIX = "post_data:";
 const VOTERS_PREFIX = "voters:";
 const LEADERBOARD_KEY = "elo_leaderboard";
+
+const RENDER_INITIAL_DELAY = 15000;
+const RENDER_POLL_DELAY = 5000;
+const MAX_RENDER_POLL_ATTEMPTS = 5;
+
+const FILENAME_ANALYSIS_PREFIX = "render_result_analysis";
+const FILENAME_ANNOTATE_PREFIX = "render_result_annotate";
 
 Devvit.configure({
   http: true,
@@ -64,10 +78,6 @@ Devvit.addSettings([
   },
 ]);
 
-const FILENAME_ANALYSIS_PREFIX = "render_result_analysis";
-const FILENAME_ANNOTATE_PREFIX = "render_result_annotate";
-const RENDER_WAIT = 30000;
-
 let ai: GoogleGenAI | undefined;
 
 function getGeminiConfig() {
@@ -75,7 +85,6 @@ function getGeminiConfig() {
     timeZone: "America/New_York",
     weekday: "long",
   });
-
   const validClassifications = Object.values(Classification).filter(
     (c) =>
       (c !== Classification.SUPERBRILLIANT &&
@@ -194,6 +203,13 @@ function getGeminiConfig() {
         type: Type.BOOLEAN,
         description:
           "true only if the input image(s) are not a conversation. Omit otherwise.",
+        nullable: true,
+      },
+      vote_target: {
+        type: Type.STRING,
+        enum: ["left", "right"],
+        description:
+          "If the Reddit post title brackets indicates a vote is being requested for one player (e.g., '[Blue]'), which side ('left' or 'right') you think the vote is for. Omit if no vote is requested in the title.",
         nullable: true,
       },
     },
@@ -373,7 +389,7 @@ const annotateAnalysisForm = Devvit.createForm(
 
       await dispatchGitHubAction(context, comment.id, analysis, "annotate");
 
-      const runAt = new Date(Date.now() + RENDER_WAIT);
+      const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
       await scheduler.runJob({
         name: "comment_analysis",
         data: { analysis, originalId: comment.id, type: "annotate" },
@@ -382,7 +398,7 @@ const annotateAnalysisForm = Devvit.createForm(
 
       ui.showToast({
         text: `Analysis requested successfully, check back in ~${Math.floor(
-          RENDER_WAIT / 1000
+          RENDER_INITIAL_DELAY / 1000
         )}s!`,
         appearance: "success",
       });
@@ -434,8 +450,8 @@ Devvit.addMenuItem({
 Devvit.addSchedulerJob({
   name: "comment_analysis",
   onRun: async (event, context) => {
-    const { analysis, originalId, type } = event.data!;
-    const { media, reddit } = context;
+    const { analysis, attempt, originalId, type } = event.data!;
+    const { media, reddit, scheduler } = context;
 
     const baseUrl = "https://cdn.allthepics.net/images";
     const datePath = formatDateAsPath(new Date());
@@ -444,12 +460,40 @@ Devvit.addSchedulerJob({
     }_${originalId}.png`;
     const imageUrl = `${baseUrl}/${datePath}/${filename}`;
 
+    let uploadResponse;
+
     try {
-      const uploadResponse = await media.upload({
+      uploadResponse = await media.upload({
         url: imageUrl,
         type: "image",
       });
+    } catch (e: any) {
+      console.error(`[${originalId}] Error uploading render`);
 
+      const curAttempt = Number(attempt ?? 1);
+
+      if (curAttempt >= MAX_RENDER_POLL_ATTEMPTS) {
+        console.log(`Max poll attempts reached, stopping...`);
+        return;
+      }
+
+      console.log(`Retrying after wait...`);
+
+      const runAt = new Date(Date.now() + RENDER_POLL_DELAY);
+      await scheduler.runJob({
+        name: "comment_analysis",
+        data: {
+          analysis,
+          attempt: curAttempt + 1,
+          originalId,
+          type,
+        },
+        runAt,
+      });
+      return;
+    }
+
+    try {
       const richTextComment =
         type === "analysis"
           ? buildReviewComment(analysis as Analysis, uploadResponse.mediaId)
@@ -476,15 +520,35 @@ Devvit.addTrigger({
 
     if (!post) return;
 
+    const dayOfWeek = new Date().toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      weekday: "long",
+    });
+
     if (
-      post.linkFlair &&
+      !post.linkFlair ||
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
     )
       return;
 
-    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+    if (
+      (post.linkFlair.templateId === MEGABLUNDER_MONDAY_FLAIR_ID &&
+        dayOfWeek !== "Monday") ||
+      (post.linkFlair.templateId === SUPERBRILLIANT_SATURDAY_FLAIR_ID &&
+        dayOfWeek !== "Saturday")
+    )
+      await reddit.setPostFlair({
+        subredditName: context.subredditName!,
+        postId: post.id,
+        flairTemplateId: REQUESTING_ANNOTATION_FLAIR_ID,
+      });
 
-    if (!(await redis.hSetNX(postDataKey, "elo_votes", `[${INITIAL_ELO}]`))) {
+    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+    const isVotePost =
+      TITLE_BRACKETS_REGEX.test(post.title) &&
+      !TITLE_NO_VOTE_REGEX.test(post.title);
+
+    if (!(await redis.hSetNX(postDataKey, "elo_votes", `[]`))) {
       console.log(
         `[${post.id}] Post is already being processed or complete. Skipping.`
       );
@@ -492,7 +556,7 @@ Devvit.addTrigger({
     }
 
     console.log(
-      `[${post.id}] Acquired lock and initialized data for post processing.`
+      `[${post.id}] Acquired lock via 'elo_votes' and initialized with empty votes.`
     );
 
     const imageUrls: string[] = [];
@@ -657,11 +721,18 @@ Devvit.addTrigger({
 
     normalizeClassifications(analysis);
 
-    if (post.linkFlair?.templateId === ELO_VOTE_FLAIR_ID) {
-      console.log(
-        `[${post.id}] Votable flair detected. Removing Gemini Elo from analysis object.`
-      );
-      delete analysis.elo;
+    if (isVotePost) {
+      console.log(`[${post.id}] Elo vote post detected... voting`);
+      if (
+        !analysis.elo ||
+        !analysis.vote_target ||
+        !analysis.elo[analysis.vote_target]
+      )
+        console.log(`[${post.id}] No valid Elo found... skipping`);
+      else
+        await handleEloVote(context, post, analysis.elo[analysis.vote_target]!);
+
+      // delete analysis.elo;
     }
 
     await redis.hSet(postDataKey, {
@@ -671,16 +742,20 @@ Devvit.addTrigger({
 
     await dispatchGitHubAction(context, post.id, analysis, "analysis");
 
-    const runAt = new Date(Date.now() + RENDER_WAIT);
-    await scheduler.runJob({
-      name: "comment_analysis",
-      data: {
-        analysis,
-        originalId: post.id,
-        type: "analysis",
-      },
-      runAt,
-    });
+    const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
+    try {
+      await scheduler.runJob({
+        name: "comment_analysis",
+        data: {
+          analysis,
+          originalId: post.id,
+          type: "analysis",
+        },
+        runAt,
+      });
+    } catch (e: any) {
+      console.error("Error scheduling future comment");
+    }
   },
 });
 
@@ -690,31 +765,34 @@ Devvit.addTrigger({
     const { post, comment, author } = event;
     const { redis, reddit } = context;
 
-    if (!post || !comment || !author) return;
+    if (!post || !comment || !author || !post.linkFlair) return;
 
-    if (post.linkFlair?.templateId !== ELO_VOTE_FLAIR_ID) return;
+    if (
+      !TITLE_BRACKETS_REGEX.test(post.title) ||
+      TITLE_NO_VOTE_REGEX.test(post.title)
+    )
+      return;
 
-    const voteCommandRegex = /!elo\s+(-?\d+)\b/i;
-    const match = comment.body.match(voteCommandRegex);
+    const match = comment.body.match(VOTE_COMMAND_REGEX);
     if (!match) return;
 
     const voteValue = parseInt(match[1], 10);
 
     if (author.id === post.authorId) {
-      const errorComment = await reddit.submitComment({
-        id: comment.id,
-        text: "⚠️ Sorry, the author can't vote on their own post.",
-      });
-      await errorComment.distinguish();
+      // const errorComment = await reddit.submitComment({
+      //   id: comment.id,
+      //   text: "⚠️ Sorry, the author can't vote on their own post.",
+      // });
+      // await errorComment.distinguish();
       return;
     }
 
     if (author.karma < MIN_KARMA_TO_VOTE) {
-      const errorComment = await reddit.submitComment({
-        id: comment.id,
-        text: `⚠️ Sorry, you need at least ${MIN_KARMA_TO_VOTE} karma to vote.`,
-      });
-      await errorComment.distinguish();
+      // const errorComment = await reddit.submitComment({
+      //   id: comment.id,
+      //   text: `⚠️ Sorry, you need at least ${MIN_KARMA_TO_VOTE} karma to vote.`,
+      // });
+      // await errorComment.distinguish();
       return;
     }
 
@@ -722,12 +800,12 @@ Devvit.addTrigger({
       .createdAt;
 
     if (Date.now() - authorAccountCreatedAt.getTime() < MIN_AGE_TO_VOTE_MS) {
-      const minDays = Math.ceil(MIN_AGE_TO_VOTE_MS / (1000 * 60 * 60 * 24));
-      const errorComment = await reddit.submitComment({
-        id: comment.id,
-        text: `⚠️ Sorry, your account must be at least ${minDays} days old to vote.`,
-      });
-      await errorComment.distinguish();
+      // const minDays = Math.ceil(MIN_AGE_TO_VOTE_MS / (1000 * 60 * 60 * 24));
+      // const errorComment = await reddit.submitComment({
+      //   id: comment.id,
+      //   text: `⚠️ Sorry, your account must be at least ${minDays} days old to vote.`,
+      // });
+      // await errorComment.distinguish();
       return;
     }
 
@@ -735,15 +813,15 @@ Devvit.addTrigger({
     const voteSuccessful = await redis.hSetNX(votersKey, author.id, "1");
 
     if (!voteSuccessful) {
-      const errorComment = await reddit.submitComment({
-        id: comment.id,
-        text: "⚠️ It looks like you've already voted on this post.",
-      });
-      await errorComment.distinguish();
+      // const errorComment = await reddit.submitComment({
+      //   id: comment.id,
+      //   text: "⚠️ It looks like you've already voted on this post.",
+      // });
+      // await errorComment.distinguish();
       return;
     }
 
-    await handleEloVote(context, post.id, voteValue);
+    await handleEloVote(context, post, voteValue);
   },
 });
 
@@ -764,15 +842,12 @@ function calculateMedianEloVote(votes: number[]): number {
 
 async function handleEloVote(
   context: TriggerContext,
-  postId: string,
-  userVote: number
+  post: PostV2,
+  vote: number
 ): Promise<void> {
   const { redis, reddit } = context;
-  const clampedVote = Math.max(
-    MIN_VOTE_VALUE,
-    Math.min(MAX_VOTE_VALUE, userVote)
-  );
-  const postDataKey = `${POST_DATA_PREFIX}${postId}`;
+  const clampedVote = Math.max(MIN_VOTE_VALUE, Math.min(MAX_VOTE_VALUE, vote));
+  const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
 
   const postData = await redis.hGetAll(postDataKey);
 
@@ -806,28 +881,38 @@ async function handleEloVote(
   });
 
   console.log(
-    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes (using median center ${median}): ${newElo}`
+    `[${post.id}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes (using median center ${median}): ${newElo}`
   );
 
   await redis.zAdd(LEADERBOARD_KEY, {
     score: newElo,
-    member: postId,
+    member: post.id,
   });
-  console.log(`[${postId}] Updated global leaderboard with score: ${newElo}`);
+  console.log(`[${post.id}] Updated global leaderboard with score: ${newElo}`);
 
   if (newVoteCount >= MIN_VOTES_FOR_FLAIR) {
-    const flairText = `Elo: ${newElo}`;
+    let titleEmoji =
+      newElo >= 2500
+        ? ":gm:"
+        : newElo >= 2400
+        ? ":im:"
+        : newElo >= 2300
+        ? ":fm:"
+        : newElo >= 2200
+        ? ":cm:"
+        : "";
+    let flairText = `${titleEmoji}${newElo} Elo`;
     try {
-      const post = await reddit.getPostById(postId);
       await reddit.setPostFlair({
-        flairTemplateId: ELO_VOTE_FLAIR_ID,
-        postId: postId,
-        subredditName: post.subredditName,
+        subredditName: context.subredditName!,
+        postId: post.id,
         text: flairText,
+        backgroundColor: getEloColor(newElo),
+        textColor: "light",
       });
-      console.log(`[${postId}] Flair updated to "${flairText}"`);
+      console.log(`[${post.id}] Flair updated to "${flairText}"`);
     } catch (e: any) {
-      console.error(`[${postId}] Failed to set flair:`, e);
+      console.error(`[${post.id}] Failed to set flair:`, e);
     }
   }
 }

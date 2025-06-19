@@ -66,4 +66,5 @@ export type Analysis = {
   opening_name: string;
   commentary: string;
   not_analyzable: boolean;
+  vote_target?: "left" | "right";
 };
