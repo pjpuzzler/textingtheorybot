@@ -3,7 +3,6 @@ import {
   TriggerContext,
   SettingScope,
   RichTextBuilder,
-  FlairTextColor,
 } from "@devvit/public-api";
 import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
 import {
@@ -49,9 +48,6 @@ const LEADERBOARD_KEY = "elo_leaderboard";
 const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
-
-const FILENAME_ANALYSIS_PREFIX = "render_result_analysis";
-const FILENAME_ANNOTATE_PREFIX = "render_result_annotate";
 
 Devvit.configure({
   http: true,
@@ -303,13 +299,12 @@ async function getGemini(context: TriggerContext): Promise<GoogleGenAI> {
 
 async function dispatchGitHubAction(
   context: TriggerContext,
-  original_id: string,
-  analysis: Analysis,
-  type: string
+  uid: string,
+  analysis: Analysis
 ): Promise<void> {
   const { settings } = context;
 
-  console.log(`[${original_id}] Dispatching GitHub Action to render image...`);
+  console.log(`${[uid]} Dispatching GitHub Action to render image...`);
   const token = (await settings.get("GITHUB_TOKEN")) as string;
   if (!token) throw new Error("Missing GitHub token in the app configuration.");
 
@@ -323,7 +318,7 @@ async function dispatchGitHubAction(
     },
     body: JSON.stringify({
       ref: "main",
-      inputs: { original_id, render_payload: JSON.stringify(analysis), type },
+      inputs: { uid, render_payload: JSON.stringify(analysis) },
     }),
   });
 
@@ -333,43 +328,51 @@ async function dispatchGitHubAction(
       `Failed to dispatch GitHub Action: ${dispatchResponse.status} ${errorText}`
     );
   }
-  console.log(`[${original_id}] GitHub Action dispatched successfully.`);
+  console.log(`${[uid]} GitHub Action dispatched successfully.`);
 }
 
 const annotateAnalysisForm = Devvit.createForm(
   (data) => ({
     title: "Annotate",
     acceptLabel: "Submit",
-    fields: data.analysis.messages.map((msg: Message, idx: number) => ({
-      type: "group",
-      label: msg.content,
-      fields: [
-        {
-          name: `side_${idx}`,
-          type: "select",
-          label: "Side",
-          options: [
-            { label: "Left", value: "left" },
-            { label: "Right", value: "right" },
-          ],
-          defaultValue: [msg.side],
-        },
-        {
-          name: `classification_${idx}`,
-          type: "select",
-          label: "Classification",
-          options: Object.values(Classification).map((c) => ({
-            label: c.charAt(0) + c.slice(1).toLowerCase(),
-            value: c,
-          })),
-          defaultValue: [msg.classification],
-        },
-      ],
-    })),
+    fields: [
+      ...data.analysis.messages.map((msg: Message, idx: number) => ({
+        type: "group",
+        label: msg.content,
+        fields: [
+          {
+            name: `side_${idx}`,
+            type: "select",
+            label: "Side",
+            options: [
+              { label: "Left", value: "left" },
+              { label: "Right", value: "right" },
+            ],
+            defaultValue: [msg.side],
+          },
+          {
+            name: `classification_${idx}`,
+            type: "select",
+            label: "Classification",
+            options: Object.values(Classification).map((c) => ({
+              label: c.charAt(0) + c.slice(1).toLowerCase(),
+              value: c,
+            })),
+            defaultValue: [msg.classification],
+          },
+        ],
+      })),
+      {
+        name: "pm_annotation",
+        label: "PM you the result (as opposed to the bot posting it)?",
+        type: "boolean",
+        defaultValue: true,
+      },
+    ],
   }),
   async (event, context) => {
     const { values } = event;
-    const { redis, reddit, scheduler, ui } = context;
+    const { redis, scheduler, ui, userId } = context;
 
     try {
       const postId = context.postId!;
@@ -381,25 +384,29 @@ const annotateAnalysisForm = Devvit.createForm(
         analysis.messages[i].classification = values[`classification_${i}`][0];
       }
 
-      const comment = await reddit.submitComment({
-        id: postId,
-        text: "[Requested custom annotation]",
-        runAs: "USER",
-      });
+      const uid = `annotate_${postId}_${userId}_${Date.now().toString()}`;
 
-      await dispatchGitHubAction(context, comment.id, analysis, "annotate");
+      await dispatchGitHubAction(context, uid, analysis);
 
       const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
+
       await scheduler.runJob({
         name: "comment_analysis",
-        data: { analysis, originalId: comment.id, type: "annotate" },
+        data: {
+          analysis,
+          originalId: postId,
+          uid,
+          requestingUserId: userId!,
+          pmAnnotation: values.pm_annotation,
+          type: "annotate",
+        },
         runAt,
       });
 
       ui.showToast({
-        text: `Analysis requested successfully, check back in ~${Math.floor(
-          RENDER_INITIAL_DELAY / 1000
-        )}s!`,
+        text: `Submitted successfully, if no result by ~${Math.floor(
+          (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
+        )}s please resubmit.`,
         appearance: "success",
       });
     } catch (e: any) {
@@ -450,14 +457,20 @@ Devvit.addMenuItem({
 Devvit.addSchedulerJob({
   name: "comment_analysis",
   onRun: async (event, context) => {
-    const { analysis, attempt, originalId, type } = event.data!;
-    const { media, reddit, scheduler } = context;
+    const {
+      analysis,
+      attempt,
+      originalId,
+      uid,
+      type,
+      requestingUserId,
+      pmAnnotation,
+    } = event.data!;
+    const { media, reddit, scheduler, subredditName } = context;
 
     const baseUrl = "https://cdn.allthepics.net/images";
     const datePath = formatDateAsPath(new Date());
-    const filename = `${
-      type === "analysis" ? FILENAME_ANALYSIS_PREFIX : FILENAME_ANNOTATE_PREFIX
-    }_${originalId}.png`;
+    const filename = `${uid}.png`;
     const imageUrl = `${baseUrl}/${datePath}/${filename}`;
 
     let uploadResponse;
@@ -468,7 +481,7 @@ Devvit.addSchedulerJob({
         type: "image",
       });
     } catch (e: any) {
-      console.error(`[${originalId}] Error uploading render`);
+      console.error(`[${uid}] Error uploading render`);
 
       const curAttempt = Number(attempt ?? 1);
 
@@ -486,28 +499,67 @@ Devvit.addSchedulerJob({
           analysis,
           attempt: curAttempt + 1,
           originalId,
+          uid,
           type,
+          requestingUserId,
+          pmAnnotation,
         },
         runAt,
       });
       return;
     }
 
-    try {
-      const richTextComment =
-        type === "analysis"
-          ? buildReviewComment(analysis as Analysis, uploadResponse.mediaId)
-          : buildAnnotateComment(analysis as Analysis, uploadResponse.mediaId);
+    if (type === "analysis") {
+      const richTextComment = buildReviewComment(
+        analysis as Analysis,
+        uploadResponse.mediaId
+      );
 
-      const comment = await reddit.submitComment({
-        id: originalId as string,
-        richtext: richTextComment,
-      });
-      await comment.distinguish(true);
+      try {
+        const comment = await reddit.submitComment({
+          id: originalId as string,
+          richtext: richTextComment,
+        });
+        await comment.distinguish(true);
 
-      console.log(`✅ [${originalId}] Successfully posted analysis comment.`);
-    } catch (e: any) {
-      console.error(`[${originalId}] Error commenting: ${e.message}`, e.stack);
+        console.log(`✅ [${uid}] Successfully posted analysis comment.`);
+      } catch (e: any) {
+        console.error(
+          `[${uid}] Error commenting analysis: ${e.message}`,
+          e.stack
+        );
+      }
+    } else if (type === "annotate") {
+      try {
+        const requestingUsername = (await reddit.getUserById(
+          requestingUserId as string
+        ))!.username;
+
+        if (pmAnnotation) {
+          const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${originalId}/`;
+          await reddit.sendPrivateMessage({
+            subject: `Your custom annotation on a post from r/${subredditName}`,
+            text: `Here's the [custom annotation](${uploadResponse.mediaUrl}) you requested for [this post](${postUrl}). You can now save it to your device and add it as a comment under the post!`,
+            to: requestingUsername,
+          });
+        } else {
+          const richTextComment = buildAnnotateComment(
+            requestingUsername,
+            uploadResponse.mediaId
+          );
+
+          const comment = await reddit.submitComment({
+            id: originalId as string,
+            richtext: richTextComment,
+          });
+          await comment.distinguish();
+        }
+      } catch (e: any) {
+        console.error(
+          `[${uid}] Error commenting/sending annotation: ${e.message}`,
+          e.stack
+        );
+      }
     }
   },
 });
@@ -515,7 +567,7 @@ Devvit.addSchedulerJob({
 Devvit.addTrigger({
   event: "PostCreate",
   onEvent: async (event, context) => {
-    const { post } = event;
+    const { post, subreddit } = event;
     const { redis, reddit, scheduler } = context;
 
     if (!post) return;
@@ -542,6 +594,8 @@ Devvit.addTrigger({
         postId: post.id,
         flairTemplateId: REQUESTING_ANNOTATION_FLAIR_ID,
       });
+
+    console.log(`[${post.id}] New post in ${subreddit?.name}.`);
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
     const isVotePost =
@@ -661,7 +715,8 @@ Devvit.addTrigger({
       ],
       config: {
         ...dynamicConfig,
-        temperature: 1.0,
+        temperature: 0.9,
+        topP: 0.95,
         responseMimeType: "application/json",
         safetySettings: [
           {
@@ -721,6 +776,11 @@ Devvit.addTrigger({
 
     normalizeClassifications(analysis);
 
+    await redis.hSet(postDataKey, {
+      analysis: JSON.stringify(analysis),
+    });
+    console.log(`[${post.id}] Analysis stored in Redis Hash.`);
+
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
       if (
@@ -730,17 +790,16 @@ Devvit.addTrigger({
       )
         console.log(`[${post.id}] No valid Elo found... skipping`);
       else
-        await handleEloVote(context, post, analysis.elo[analysis.vote_target]!);
-
-      // delete analysis.elo;
+        handleEloVote(context, post, analysis.elo[analysis.vote_target]!).catch(
+          (e) => {
+            console.error(`[${post.id}] Error in handleEloVote:`, e);
+          }
+        );
     }
 
-    await redis.hSet(postDataKey, {
-      analysis: JSON.stringify(analysis),
-    });
-    console.log(`[${post.id}] Analysis stored in Redis Hash.`);
+    const uid = `analysis_${post.id}`;
 
-    await dispatchGitHubAction(context, post.id, analysis, "analysis");
+    await dispatchGitHubAction(context, uid, analysis);
 
     const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
     try {
@@ -749,12 +808,51 @@ Devvit.addTrigger({
         data: {
           analysis,
           originalId: post.id,
+          uid,
           type: "analysis",
         },
         runAt,
       });
     } catch (e: any) {
       console.error("Error scheduling future comment");
+    }
+  },
+});
+
+Devvit.addTrigger({
+  event: "PostDelete",
+  onEvent: async (event, context) => {
+    const { postId } = event;
+    const { appName, redis, reddit } = context;
+
+    console.log(`[${postId}] Post deleted.`);
+
+    try {
+      const comments = await reddit.getComments({ postId }).all();
+      for (const comment of comments) {
+        if (comment.authorName === appName) {
+          try {
+            await comment.delete();
+            console.log(`[${postId}] Bot comment(s) deleted successfully.`);
+          } catch (e: any) {
+            console.error(
+              `[${postId}] Failed to delete bot comment ${comment.id}:`,
+              e
+            );
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error(`[${postId}] Error fetching comments for deletion:`, e);
+    }
+
+    try {
+      await redis.del(`${POST_DATA_PREFIX}${postId}`);
+      await redis.del(`${VOTERS_PREFIX}${postId}`);
+      await redis.zRem(LEADERBOARD_KEY, [postId]);
+      console.log(`[${postId}] Redis cleared successfully.`);
+    } catch (e: any) {
+      console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
   },
 });
@@ -832,12 +930,9 @@ function calculateMedianEloVote(votes: number[]): number {
   const sorted = [...votes].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
 
-  if (sorted.length % 2 === 0) {
-    // Even number of votes, return the average of the two middle ones
-    return (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-  // Odd number of votes, return the middle one
-  return sorted[mid];
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
 }
 
 async function handleEloVote(
@@ -851,14 +946,14 @@ async function handleEloVote(
 
   const postData = await redis.hGetAll(postDataKey);
 
-  // 1. Get all previous votes and add the new one.
+  // Get all previous votes and add the new one.
   const eloVotes: number[] = JSON.parse(postData.elo_votes);
   eloVotes.push(clampedVote);
 
-  // 2. Calculate the "center of gravity" using the median.
+  // Calculate the "center of gravity" using the median.
   const median = calculateMedianEloVote(eloVotes);
 
-  // 3. For each vote, calculate its weight based on its distance from the median.
+  // For each vote, calculate its weight based on its distance from the median.
   let totalWeightedVotes = 0;
   let totalWeight = 0;
   const toleranceSquared = ELO_VOTE_TOLERANCE * ELO_VOTE_TOLERANCE;
@@ -871,11 +966,10 @@ async function handleEloVote(
     totalWeight += weight;
   }
 
-  // 4. The new Elo is the final weighted average.
+  // The new Elo is the final weighted average.
   const newElo = Math.round(totalWeightedVotes / totalWeight),
     newVoteCount = eloVotes.length;
 
-  // 5. Store the results
   await redis.hSet(postDataKey, {
     elo_votes: JSON.stringify(eloVotes),
   });
@@ -891,17 +985,7 @@ async function handleEloVote(
   console.log(`[${post.id}] Updated global leaderboard with score: ${newElo}`);
 
   if (newVoteCount >= MIN_VOTES_FOR_FLAIR) {
-    let titleEmoji =
-      newElo >= 2500
-        ? ":gm:"
-        : newElo >= 2400
-        ? ":im:"
-        : newElo >= 2300
-        ? ":fm:"
-        : newElo >= 2200
-        ? ":cm:"
-        : "";
-    let flairText = `${titleEmoji}${newElo} Elo`;
+    let flairText = `${newElo} Elo`;
     try {
       await reddit.setPostFlair({
         subredditName: context.subredditName!,
@@ -1019,11 +1103,13 @@ function buildReviewComment(
 }
 
 function buildAnnotateComment(
-  analysis: Analysis,
+  requestingUsername: string,
   mediaId: string
 ): RichTextBuilder {
   return new RichTextBuilder()
-    .paragraph((p) => p.text({ text: "Here's your annotation:" }))
+    .paragraph((p) =>
+      p.text({ text: `Custom annotation by u/${requestingUsername}` })
+    )
     .image({ mediaId });
 }
 

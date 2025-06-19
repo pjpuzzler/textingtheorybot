@@ -1,13 +1,14 @@
 {
   "private": true,
   "name": "textingtheorybot",
-  "version": "0.0.0",
+  "version": "2.0.0",
   "license": "BSD-3-Clause",
   "type": "module",
   "dependencies": {
     "@devvit/public-api": "^0.11.17",
     "@google/genai": "latest",
-    "@pinecone-database/pinecone": "latest"
+    "@pinecone-database/pinecone": "latest",
+    "vitest": "^3.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
