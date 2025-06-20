@@ -35,6 +35,12 @@ export type CountedClassification =
   | Classification.BLUNDER
   | Classification.MEGABLUNDER;
 
+export type RedditComment = {
+  username: string;
+  content: string;
+  classification?: Classification;
+};
+
 export type Message = {
   side: "left" | "right";
   content: string;
