@@ -15,7 +15,11 @@ import {
   HarmBlockThreshold,
   Type,
 } from "@google/genai";
-import { SYSTEM_PROMPT } from "./systemPrompt.js";
+import {
+  MEGABLUNDER_TEXT,
+  SUPERBRILLIANT_TEXT,
+  SYSTEM_PROMPT,
+} from "./systemPrompt.js";
 import {
   Analysis,
   Classification,
@@ -27,13 +31,14 @@ import { getEloColor } from "./color.js";
 
 const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
-const ELO_VOTE_TOLERANCE = 300;
+const ELO_VOTE_TOLERANCE = 200;
 const MIN_VOTES_FOR_FLAIR = 1;
-const MIN_KARMA_TO_VOTE = 25;
+const POST_FLAIR_TIME_LIMIT_MS = 1 * 60 * 60 * 1000;
+const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const TITLE_BRACKETS_REGEX = /^\[\S(.*\S)?\]/i;
-const TITLE_NO_VOTE_REGEX = /^\[no vote\]/i;
+// const TITLE_BRACKETS_REGEX = /^\[\S(.*\S)?\]/i;
+// const TITLE_NO_VOTE_REGEX = /^\[no vote\]/i;
 const VOTE_COMMAND_REGEX = /!elo\s+(-?\d+)\b/i;
 
 const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
@@ -91,9 +96,6 @@ function getGeminiConfig() {
       (c === Classification.MEGABLUNDER && dayOfWeek === "Monday")
   );
 
-  const SUPERBRILLIANT_TEXT = `\`Superbrilliant\` (0.1% rarity) An absolutely god-like find, perfection. Someone can try for years and never get a classification this good. (Only available because today is Saturday).`;
-  const MEGABLUNDER_TEXT = `\`Megablunder\` (5% rarity) No coming back from this. The worst of the worst. (Only available because today is Monday).`;
-
   let finalSystemPrompt = SYSTEM_PROMPT.replace(
     "// ANCHOR_FOR_SUPERBRILLIANT",
     dayOfWeek === "Saturday" ? SUPERBRILLIANT_TEXT : ""
@@ -124,7 +126,7 @@ function getGeminiConfig() {
       elo: {
         type: Type.OBJECT,
         description: "Estimated Elo ratings for the players.",
-        nullable: true, // The whole elo block is optional
+        nullable: true,
         properties: {
           left: {
             type: Type.NUMBER,
@@ -287,13 +289,16 @@ function normalizeClassifications(analysis: Analysis): void {
   }
 }
 
-function getNormalizedCommentBody(context: Context, comment: Comment): string {
-  const { appName } = context;
-
-  if (comment.authorName === appName)
-    return comment.body.startsWith("Annotation")
-      ? "[Custom Annotation]"
+function getNormalizedCommentBody(
+  botUsername: string,
+  comment: Comment
+): string {
+  if (comment.authorName === botUsername) {
+    const usernameMatch = comment.body.match(/u\/[A-Za-z0-9_-]+/);
+    return usernameMatch
+      ? `[${usernameMatch[0]}'s Annotation]`
       : "[Game Review]";
+  }
 
   let body = comment.body;
 
@@ -334,6 +339,138 @@ function getNormalizedCommentBody(context: Context, comment: Comment): string {
   body = body.replace(/`([^`]*)`/g, "$1");
 
   return body;
+}
+
+async function getGeminiAnalysis(
+  apiKey: string,
+  imageUrls: string[],
+  postId: string,
+  postTitle: string,
+  postBody: string | undefined
+): Promise<Analysis | undefined> {
+  if (!imageUrls.length) {
+    console.log(
+      `[${postId}] No processable images found in post or its source. Skipping.`
+    );
+    return;
+  }
+
+  console.log(
+    `[${postId}] Found ${imageUrls.length} image(s) to analyze. Fetching content...`
+  );
+
+  const geminiImageParts = [];
+
+  try {
+    const imageFetchPromises = imageUrls.map(async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(
+          `[${postId}] Failed to fetch image at ${url}: ${response.status} ${response.statusText}`
+        );
+        return null;
+      }
+      const imageBuffer = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      return createPartFromBase64(imageBuffer.toString("base64"), contentType);
+    });
+
+    const results = await Promise.all(imageFetchPromises);
+    for (const part of results) {
+      if (part) {
+        geminiImageParts.push(part);
+      }
+    }
+  } catch (error) {
+    console.error(
+      `[${postId}] An error occurred while fetching images: ${error}`
+    );
+    return;
+  }
+
+  if (!geminiImageParts.length) {
+    console.log(
+      `[${postId}] All image fetches failed or returned no data. Skipping.`
+    );
+    return;
+  }
+
+  const dynamicConfig = getGeminiConfig();
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  console.log(
+    `[${postId}] Sending ${geminiImageParts.length} image(s) to Gemini with a structured schema.`
+  );
+
+  const geminiResponse = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [
+      createUserContent([
+        `Reddit Post Title: "${postTitle}"\n\nReddit Post Body: "${
+          postBody ?? ""
+        }"`,
+        ...geminiImageParts,
+      ]),
+    ],
+    config: {
+      ...dynamicConfig,
+      temperature: 0.5,
+      topP: 0.98,
+      responseMimeType: "application/json",
+      thinkingConfig: {
+        thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
+      },
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.OFF,
+        },
+      ],
+    },
+  });
+
+  const geminiResponseText = geminiResponse.text;
+
+  if (!geminiResponseText) {
+    console.log(
+      `[${postId}] Gemini gave an undefined or empty response text. Skipping.`
+    );
+    return;
+  }
+
+  let analysis: Analysis;
+  try {
+    analysis = JSON.parse(geminiResponseText);
+  } catch (parseError) {
+    console.error(
+      `[${postId}] Failed to parse Gemini JSON response: ${parseError}`,
+      geminiResponseText
+    );
+    return;
+  }
+
+  console.log(
+    `[${postId}] Parsed Gemini response: ${JSON.stringify(analysis)}`
+  );
+
+  return analysis;
 }
 
 async function dispatchGitHubAction(
@@ -406,7 +543,7 @@ const annotateAnalysisForm = Devvit.createForm(
         name: "pm_annotation",
         label: "PM you the result (as opposed to the bot posting it)?",
         type: "boolean",
-        defaultValue: true,
+        defaultValue: false,
       },
     ],
   }),
@@ -479,7 +616,7 @@ const annotateRedditChainForm = Devvit.createForm(
         name: "pm_annotation",
         label: "PM you the result (as opposed to the bot posting it)?",
         type: "boolean",
-        defaultValue: true,
+        defaultValue: false,
       },
     ],
   }),
@@ -583,7 +720,7 @@ Devvit.addMenuItem({
       const comment = await reddit.getCommentById(nextId);
       const redditComment: RedditComment = {
         username: comment.authorName,
-        content: getNormalizedCommentBody(context, comment),
+        content: getNormalizedCommentBody(appName, comment),
       };
       commentChain.unshift(redditComment);
       nextId = comment.parentId;
@@ -594,6 +731,101 @@ Devvit.addMenuItem({
     });
 
     ui.showForm(annotateRedditChainForm, { commentChain });
+  },
+});
+
+Devvit.addMenuItem({
+  label: "Force Analysis (Mod Only)",
+  location: "post",
+  onPress: async (event, context) => {
+    const { targetId } = event;
+    const { redis, reddit, scheduler, settings, subredditName, userId, ui } =
+      context;
+
+    const moderators = await reddit
+      .getModerators({ subredditName: subredditName! })
+      .all();
+
+    if (!moderators.some((mod) => mod.id === userId)) {
+      ui.showToast("Error: Invalid permissions");
+      return;
+    }
+
+    const apiKey: string | undefined = await settings.get("GEMINI_API_KEY");
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set in app settings.");
+
+    const post = await reddit.getPostById(targetId);
+
+    if (!post || post.removedByCategory) return;
+
+    console.log(`[${post.id}] Forced analysis in r/${subredditName}.`);
+
+    let analysis: Analysis | undefined;
+
+    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+
+    const postData = await redis.hGetAll(postDataKey);
+    if (postData.analysis) {
+      analysis = JSON.parse(postData.analysis);
+    } else {
+      const imageUrls: string[] = [];
+
+      if (post.gallery.length) {
+        console.log(
+          `[${post.id}] Post content has ${post.gallery.length} items.`
+        );
+        for (const galleryMedia of post.gallery) {
+          imageUrls.push(galleryMedia.url);
+        }
+      }
+
+      analysis = await getGeminiAnalysis(
+        apiKey,
+        imageUrls,
+        post.id,
+        post.title,
+        post.body
+      );
+    }
+
+    if (!analysis) {
+      console.log(`[${post.id}] No analysis, returning`);
+      return;
+    }
+
+    if (analysis.not_analyzable) {
+      console.log(
+        `[${post.id}] Gemini determined this is not analyzable. Skipping.`
+      );
+      return;
+    }
+
+    normalizeClassifications(analysis);
+
+    await redis.hSet(postDataKey, {
+      analysis: JSON.stringify(analysis),
+    });
+    console.log(`[${post.id}] Analysis stored in Redis Hash.`);
+
+    const uid = `analysis_${post.id}`;
+
+    await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
+
+    const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
+    try {
+      await scheduler.runJob({
+        name: "comment_analysis",
+        data: {
+          analysis,
+          originalId: post.id,
+          uid,
+          type: "analysis",
+        },
+        runAt,
+      });
+    } catch (e: any) {
+      console.error("Error scheduling future comment");
+    }
   },
 });
 
@@ -668,7 +900,7 @@ Devvit.addSchedulerJob({
           .getComments({ postId: originalId as string })
           .all();
         for (const postComment of postComments) {
-          if (postComment.authorName === appName) {
+          if (postComment.authorName === appName && !postComment.removed) {
             console.log(
               `[${originalId}] Already posted a comment to this post, aborting.`
             );
@@ -783,8 +1015,9 @@ Devvit.addTrigger({
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
     const isVotePost =
-      TITLE_BRACKETS_REGEX.test(post.title) &&
-      !TITLE_NO_VOTE_REGEX.test(post.title);
+      // TITLE_BRACKETS_REGEX.test(post.title) &&
+      // !TITLE_NO_VOTE_REGEX.test(post.title);
+      true;
 
     const newField = await redis.hSetNX(postDataKey, "elo_votes", `[]`);
 
@@ -844,129 +1077,15 @@ Devvit.addTrigger({
       }
     }
 
-    if (!imageUrls.length) {
-      console.log(
-        `[${post.id}] No processable images found in post or its source. Skipping.`
-      );
-      return;
-    }
-
-    console.log(
-      `[${post.id}] Found ${imageUrls.length} image(s) to analyze. Fetching content...`
+    const analysis = await getGeminiAnalysis(
+      apiKey,
+      imageUrls,
+      post.id,
+      post.title,
+      post.selftext
     );
 
-    const geminiImageParts = [];
-
-    try {
-      const imageFetchPromises = imageUrls.map(async (url) => {
-        const response = await fetch(url);
-        if (!response.ok) {
-          console.error(
-            `[${post.id}] Failed to fetch image at ${url}: ${response.status} ${response.statusText}`
-          );
-          return null;
-        }
-        const imageBuffer = Buffer.from(await response.arrayBuffer());
-        const contentType =
-          response.headers.get("content-type") || "image/jpeg";
-        return createPartFromBase64(
-          imageBuffer.toString("base64"),
-          contentType
-        );
-      });
-
-      const results = await Promise.all(imageFetchPromises);
-      for (const part of results) {
-        if (part) {
-          geminiImageParts.push(part);
-        }
-      }
-    } catch (error) {
-      console.error(
-        `[${post.id}] An error occurred while fetching images: ${error}`
-      );
-      return;
-    }
-
-    if (!geminiImageParts.length) {
-      console.log(
-        `[${post.id}] All image fetches failed or returned no data. Skipping.`
-      );
-      return;
-    }
-
-    const dynamicConfig = getGeminiConfig();
-
-    const ai = new GoogleGenAI({ apiKey });
-
-    console.log(
-      `[${post.id}] Sending ${geminiImageParts.length} image(s) to Gemini with a structured schema.`
-    );
-
-    const geminiResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        createUserContent([
-          `Reddit Post Title: "${post.title}"\n\nReddit Post Body: "${post.selftext}"`,
-          ...geminiImageParts,
-        ]),
-      ],
-      config: {
-        ...dynamicConfig,
-        temperature: 0.85,
-        topP: 0.95,
-        responseMimeType: "application/json",
-        thinkingConfig: {
-          thinkingBudget: 24576,
-        },
-        safetySettings: [
-          {
-            category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
-            threshold: HarmBlockThreshold.OFF,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold: HarmBlockThreshold.OFF,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold: HarmBlockThreshold.OFF,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold: HarmBlockThreshold.OFF,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold: HarmBlockThreshold.OFF,
-          },
-        ],
-      },
-    });
-
-    const geminiResponseText = geminiResponse.text;
-
-    if (!geminiResponseText) {
-      console.log(
-        `[${post.id}] Gemini gave an undefined or empty response text. Skipping.`
-      );
-      return;
-    }
-
-    let analysis: Analysis;
-    try {
-      analysis = JSON.parse(geminiResponseText);
-    } catch (parseError) {
-      console.error(
-        `[${post.id}] Failed to parse Gemini JSON response: ${parseError}`,
-        geminiResponseText
-      );
-      return;
-    }
-
-    console.log(
-      `[${post.id}] Parsed Gemini response: ${JSON.stringify(analysis)}`
-    );
+    if (!analysis) return;
 
     if (analysis.not_analyzable) {
       console.log(
@@ -1080,8 +1199,9 @@ Devvit.addTrigger({
     if (!post || !comment || !author || !post.linkFlair) return;
 
     if (
-      !TITLE_BRACKETS_REGEX.test(post.title) ||
-      TITLE_NO_VOTE_REGEX.test(post.title)
+      // !TITLE_BRACKETS_REGEX.test(post.title) ||
+      // TITLE_NO_VOTE_REGEX.test(post.title)
+      NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
     )
       return;
 
@@ -1199,8 +1319,15 @@ async function handleEloVote(
   });
   console.log(`[${post.id}] Updated global leaderboard with score: ${newElo}`);
 
-  if (newVoteCount >= MIN_VOTES_FOR_FLAIR) {
-    let flairText = `${newElo} Elo`;
+  const timeSincePost = Date.now() - post.createdAt;
+
+  if (
+    newVoteCount >= MIN_VOTES_FOR_FLAIR ||
+    timeSincePost >= POST_FLAIR_TIME_LIMIT_MS
+  ) {
+    let flairText = `${newElo} Elo (${newVoteCount} ${
+      newVoteCount === 1 ? "vote" : "votes"
+    })`;
     try {
       await reddit.setPostFlair({
         subredditName: context.subredditName!,
