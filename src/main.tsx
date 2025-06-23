@@ -36,10 +36,17 @@ const MIN_VOTES_FOR_FLAIR = 1;
 const POST_FLAIR_TIME_LIMIT_MS = 1 * 60 * 60 * 1000;
 const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
+const MIN_ELO_USER_FLAIR = 1400;
+const MIN_VOTES_FOR_USER_FLAIR = 10;
+
+const REQUIRED_ELO_VOTE_INTERVAL = 10;
+const REQUIRED_ELO_VOTE_WARNING_WINDOW = 3;
 
 // const TITLE_BRACKETS_REGEX = /^\[\S(.*\S)?\]/i;
 // const TITLE_NO_VOTE_REGEX = /^\[no vote\]/i;
+const TITLE_ME_VOTE_REGEX = /^\[me\]/i;
 const VOTE_COMMAND_REGEX = /!elo\s+(-?\d+)\b/i;
+const ELO_REGEX = /(\d+)\s*Elo/i;
 
 const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
   ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
@@ -47,11 +54,20 @@ const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
   SUPERBRILLIANT_SATURDAY_FLAIR_ID = "b4df51ec-4c76-11f0-8011-568335338cf7",
   META_FLAIR_ID = "edde53c6-7cb1-11ee-8104-3e49ebced071",
   ANNOUNCEMENT_FLAIR_ID = "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf";
+
 const NO_ANALYSIS_FLAIR_IDS = [META_FLAIR_ID, ANNOUNCEMENT_FLAIR_ID];
+
+const CUSTOM_1_FLAIR_ID = "22828506-cad6-11eb-ba90-0e07bb4c3bf9";
+const CUSTOM_2_FLAIR_ID = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
+
+const NO_ELO_USER_FLAIR_IDS = [CUSTOM_1_FLAIR_ID, CUSTOM_2_FLAIR_ID];
+
+const REQUIRED_ELO_VOTE_REMOVAL_ID = "47c69907-6838-4e06-9371-0528ab7fabeb";
 
 const POST_DATA_PREFIX = "post_data:";
 const COMMENT_CHAIN_DATA_PREFIX = "comment_chain:";
 const VOTERS_PREFIX = "voters:";
+const NON_ELO_VOTE_COMMENT_COUNT_PREFIX = "non_elo_vote_comment_count:";
 const LEADERBOARD_KEY = "elo_leaderboard";
 
 const RENDER_INITIAL_DELAY = 15000;
@@ -419,7 +435,9 @@ async function getGeminiAnalysis(
       topP: 0.98,
       responseMimeType: "application/json",
       thinkingConfig: {
-        thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
+        // thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
+        // thinkingBudget: 24576,
+        thinkingBudget: -1,
       },
       safetySettings: [
         {
@@ -1008,7 +1026,7 @@ Devvit.addTrigger({
     });
 
     if (
-      !post.linkFlair ||
+      post.linkFlair &&
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
     )
       return;
@@ -1033,9 +1051,9 @@ Devvit.addTrigger({
     );
 
     if (
-      (post.linkFlair.templateId === MEGABLUNDER_MONDAY_FLAIR_ID &&
+      (post.linkFlair?.templateId === MEGABLUNDER_MONDAY_FLAIR_ID &&
         dayOfWeek !== "Monday") ||
-      (post.linkFlair.templateId === SUPERBRILLIANT_SATURDAY_FLAIR_ID &&
+      (post.linkFlair?.templateId === SUPERBRILLIANT_SATURDAY_FLAIR_ID &&
         dayOfWeek !== "Saturday")
     )
       await reddit.setPostFlair({
@@ -1194,66 +1212,82 @@ Devvit.addTrigger({
   event: "CommentCreate",
   onEvent: async (event, context) => {
     const { post, comment, author } = event;
-    const { redis, reddit } = context;
+    const { redis, reddit, subredditName } = context;
 
-    if (!post || !comment || !author || !post.linkFlair) return;
+    if (!post || !comment || !author) return;
 
     if (
-      // !TITLE_BRACKETS_REGEX.test(post.title) ||
-      // TITLE_NO_VOTE_REGEX.test(post.title)
+      post.linkFlair &&
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
     )
       return;
 
     const match = comment.body.match(VOTE_COMMAND_REGEX);
-    if (!match) return;
-
-    const voteValue = parseInt(match[1], 10);
-
-    if (author.id === post.authorId) {
-      // const errorComment = await reddit.submitComment({
-      //   id: comment.id,
-      //   text: "⚠️ Sorry, the author can't vote on their own post.",
-      // });
-      // await errorComment.distinguish();
-      return;
-    }
-
-    if (author.karma < MIN_KARMA_TO_VOTE) {
-      // const errorComment = await reddit.submitComment({
-      //   id: comment.id,
-      //   text: `⚠️ Sorry, you need at least ${MIN_KARMA_TO_VOTE} karma to vote.`,
-      // });
-      // await errorComment.distinguish();
-      return;
-    }
-
-    const authorAccountCreatedAt = (await reddit.getUserById(author.id))!
-      .createdAt;
-
-    if (Date.now() - authorAccountCreatedAt.getTime() < MIN_AGE_TO_VOTE_MS) {
-      // const minDays = Math.ceil(MIN_AGE_TO_VOTE_MS / (1000 * 60 * 60 * 24));
-      // const errorComment = await reddit.submitComment({
-      //   id: comment.id,
-      //   text: `⚠️ Sorry, your account must be at least ${minDays} days old to vote.`,
-      // });
-      // await errorComment.distinguish();
-      return;
-    }
-
     const votersKey = `${VOTERS_PREFIX}${post.id}`;
-    const voteSuccessful = await redis.hSetNX(votersKey, author.id, "1");
+    const userGlobalCommentCountKey = `${NON_ELO_VOTE_COMMENT_COUNT_PREFIX}${author.id}`;
 
-    if (!voteSuccessful) {
-      // const errorComment = await reddit.submitComment({
-      //   id: comment.id,
-      //   text: "⚠️ It looks like you've already voted on this post.",
-      // });
-      // await errorComment.distinguish();
-      return;
+    // Increment global comment count for this user
+    const count = await redis.incrBy(userGlobalCommentCountKey, 1);
+
+    if (!match) {
+      const moderators = await reddit
+        .getModerators({ subredditName: subredditName! })
+        .all();
+
+      if (
+        moderators.some((mod) => mod.id === author.id) ||
+        author.name === "FallacyFinderBot"
+      )
+        return;
+
+      // If user is over the allowed interval and hasn't voted, remove comment and add reason
+      if (count > REQUIRED_ELO_VOTE_INTERVAL) {
+        try {
+          const removalMessage = await reddit.submitComment({
+            id: comment.id,
+            text: `Your comment was removed for exceeding the maximum allowed without an Elo vote (**${REQUIRED_ELO_VOTE_INTERVAL}**). Please submit a vote using **!elo** to continue commenting.`,
+          });
+          await removalMessage.distinguish();
+
+          await reddit.remove(comment.id, false);
+          await reddit.addRemovalNote({
+            itemIds: [comment.id],
+            reasonId: REQUIRED_ELO_VOTE_REMOVAL_ID,
+            modNote: `Removed for exceeding the number of comments allowed without an Elo vote (${REQUIRED_ELO_VOTE_INTERVAL})`,
+          });
+        } catch (e) {
+          console.error(`Failed to remove comment for user ${author.id}:`, e);
+        }
+        // If user is near the interval and hasn't voted, warn them
+      } else if (
+        count >
+        REQUIRED_ELO_VOTE_INTERVAL - REQUIRED_ELO_VOTE_WARNING_WINDOW
+      ) {
+        try {
+          const warning = await reddit.submitComment({
+            id: comment.id,
+            text: `Hi u/${author.name}, just a heads-up, you are required to submit an Elo vote at least every **${REQUIRED_ELO_VOTE_INTERVAL} comments** (you're currently at **${count}**). Make sure you submit a vote using **!elo** before reaching this threshold.`,
+          });
+          await warning.distinguish();
+        } catch (e) {
+          console.error(`Failed to warn user ${author.id}:`, e);
+        }
+      }
+    } else {
+      await redis.set(userGlobalCommentCountKey, "0");
+
+      const authorAccountCreatedAt = (await reddit.getUserById(author.id))!
+        .createdAt;
+      const voteValue = parseInt(match[1], 10);
+
+      if (
+        author.id !== post.authorId &&
+        author.karma >= MIN_KARMA_TO_VOTE &&
+        Date.now() - authorAccountCreatedAt.getTime() >= MIN_AGE_TO_VOTE_MS &&
+        (await redis.hSetNX(votersKey, author.id, "1"))
+      )
+        await handleEloVote(context, post, voteValue);
     }
-
-    await handleEloVote(context, post, voteValue);
   },
 });
 
@@ -1325,18 +1359,48 @@ async function handleEloVote(
     newVoteCount >= MIN_VOTES_FOR_FLAIR ||
     timeSincePost >= POST_FLAIR_TIME_LIMIT_MS
   ) {
-    let flairText = `${newElo} Elo (${newVoteCount} ${
+    const flairText = `${newElo} Elo (${newVoteCount} ${
       newVoteCount === 1 ? "vote" : "votes"
     })`;
+    const newEloColor = getEloColor(newElo);
     try {
       await reddit.setPostFlair({
         subredditName: context.subredditName!,
         postId: post.id,
         text: flairText,
-        backgroundColor: getEloColor(newElo),
+        backgroundColor: newEloColor,
         textColor: "light",
       });
       console.log(`[${post.id}] Flair updated to "${flairText}"`);
+
+      if (
+        !TITLE_ME_VOTE_REGEX.test(post.title) ||
+        newVoteCount < MIN_VOTES_FOR_USER_FLAIR ||
+        (post.authorFlair &&
+          NO_ELO_USER_FLAIR_IDS.includes(post.authorFlair.templateId))
+      )
+        return;
+
+      let curUserElo: number | undefined;
+      const eloUserFlairMatch = post.authorFlair?.text.match(ELO_REGEX);
+      if (eloUserFlairMatch) curUserElo = parseInt(eloUserFlairMatch![1], 10);
+
+      if (
+        newElo >= MIN_ELO_USER_FLAIR &&
+        (!curUserElo || newElo > curUserElo)
+      ) {
+        const userFlairText = `${newElo} Elo`;
+
+        await reddit.setUserFlair({
+          subredditName: context.subredditName!,
+          username: (await reddit.getUserById(post.authorId))!.username,
+          text: userFlairText,
+          backgroundColor: newEloColor,
+          textColor: "light",
+        });
+
+        console.log(`[${post.id}] User flair updated to "${userFlairText}"`);
+      }
     } catch (e: any) {
       console.error(`[${post.id}] Failed to set flair:`, e);
     }
