@@ -50,6 +50,7 @@ const REQUIRED_ELO_VOTE_WARNING_WINDOW = 2;
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
 const ELO_VOTE_REGEX = /!elo\s+(-?\d+)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
+const USERNAME_REGEX = /u\/[A-Za-z0-9_-]+/;
 
 const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
   ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
@@ -322,7 +323,7 @@ function getNormalizedCommentBody(
   comment: Comment
 ): string {
   if (comment.authorName === botUsername) {
-    const usernameMatch = comment.body.match(/u\/[A-Za-z0-9_-]+/);
+    const usernameMatch = comment.body.match(USERNAME_REGEX);
     return usernameMatch
       ? `[${usernameMatch[0]}'s Annotation]`
       : "[Game Review]";
@@ -811,9 +812,7 @@ Devvit.addMenuItem({
 
     if (!post || post.removedByCategory) return;
 
-    console.log(
-      `[${post.id}] ${userId} forced analysis in r/${subredditName}.`
-    );
+    console.log(`[${post.id}] ${userId} forced analysis.`);
 
     let analysis: Analysis | undefined;
 
@@ -841,37 +840,39 @@ Devvit.addMenuItem({
         post.title,
         post.body
       );
+
+      if (!analysis) {
+        console.log(`[${post.id}] No analysis, returning`);
+        return;
+      }
+
+      if (analysis.not_analyzable) {
+        console.log(
+          `[${post.id}] Gemini determined this is not analyzable. Skipping.`
+        );
+        return;
+      }
+
+      normalizeClassifications(analysis);
+
+      await redis.hSet(postDataKey, {
+        analysis: JSON.stringify(analysis),
+      });
+      console.log(`[${post.id}] Analysis stored in Redis Hash.`);
     }
-
-    if (!analysis) {
-      console.log(`[${post.id}] No analysis, returning`);
-      return;
-    }
-
-    if (analysis.not_analyzable) {
-      console.log(
-        `[${post.id}] Gemini determined this is not analyzable. Skipping.`
-      );
-      return;
-    }
-
-    normalizeClassifications(analysis);
-
-    await redis.hSet(postDataKey, {
-      analysis: JSON.stringify(analysis),
-    });
-    console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
     const uid = `analysis_${post.id}`;
 
-    await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
+    await dispatchGitHubAction(context, uid, analysis!, "render_and_upload");
+
+    ui.showToast("Dispatched successfully");
 
     const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
     try {
       await scheduler.runJob({
         name: "comment_analysis",
         data: {
-          analysis,
+          analysis: analysis!,
           originalId: post.id,
           uid,
           type: "analysis",
@@ -881,6 +882,33 @@ Devvit.addMenuItem({
     } catch (e: any) {
       console.error("Error scheduling future comment");
     }
+  },
+});
+
+Devvit.addMenuItem({
+  label: "Delete Saved Analysis (Mod Only)",
+  location: "post",
+  onPress: async (event, context) => {
+    const { targetId } = event;
+    const { redis, reddit, subredditName, userId, ui } = context;
+
+    const moderators = await reddit
+      .getModerators({ subredditName: subredditName! })
+      .all();
+
+    if (!moderators.some((mod) => mod.id === userId)) {
+      ui.showToast("Error: Invalid permissions");
+      return;
+    }
+
+    const post = await reddit.getPostById(targetId);
+
+    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+
+    await redis.hDel(postDataKey, ["analysis"]);
+
+    console.log(`[${post.id}] ${userId} deleted saved analysis.`);
+    ui.showToast("Deleted successfully");
   },
 });
 
@@ -955,7 +983,11 @@ Devvit.addSchedulerJob({
           .getComments({ postId: originalId as string })
           .all();
         for (const postComment of postComments) {
-          if (postComment.authorName === appName && !postComment.removed) {
+          if (
+            postComment.authorName === appName &&
+            !postComment.removed &&
+            !USERNAME_REGEX.test(postComment.body)
+          ) {
             console.log(
               `[${originalId}] Already posted a comment to this post, aborting.`
             );
@@ -1201,16 +1233,16 @@ Devvit.addTrigger({
       }
     }
 
-    try {
-      const convoText = getConvoText(analysis.messages);
-      const embedding = await getEmbedding(ai, convoText);
+    // try {
+    //   const convoText = getConvoText(analysis.messages);
+    //   const embedding = await getEmbedding(ai, convoText);
 
-      await pineconeIndex.upsert([
-        { id: post.id, values: embedding, metadata: { convoText } },
-      ]);
-    } catch (e: any) {
-      console.error("Error upserting embedding to Pinecone", e);
-    }
+    //   await pineconeIndex.upsert([
+    //     { id: post.id, values: embedding, metadata: { convoText } },
+    //   ]);
+    // } catch (e: any) {
+    //   console.error("Error upserting embedding to Pinecone", e);
+    // }
 
     const uid = `analysis_${post.id}`;
 
