@@ -35,7 +35,7 @@ const MIN_VOTE_CLAMP = 100;
 const MAX_VOTE_VALUE = 3000;
 const MAX_VOTE_CLAMP = 3000;
 const ELO_VOTE_TOLERANCE = 200;
-const MIN_VOTES_FOR_FLAIR = 1;
+const MIN_VOTES_FOR_FLAIR = 3;
 const POST_FLAIR_TIME_LIMIT_MS = 1 * 60 * 60 * 1000;
 const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -78,7 +78,9 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 Devvit.configure({
-  http: true,
+  http: {
+    domains: ["api.pinecone.io"],
+  },
   media: true,
   redditAPI: true,
   redis: true,
@@ -144,7 +146,7 @@ function getGeminiConfig() {
               type: Type.STRING,
               enum: validClassifications,
             },
-            unsent: { type: Type.BOOLEAN, nullable: true },
+            // unsent: { type: Type.BOOLEAN, nullable: true },
           },
           required: ["side", "content", "classification"],
         },
@@ -221,9 +223,9 @@ function getGeminiConfig() {
         type: Type.STRING,
         description: "A creative opening name for the conversation.",
       },
-      commentary: {
+      comment: {
         type: Type.STRING,
-        description: "A one-sentence commentary on the game or conversation.",
+        description: "A one-sentence comment on the conversation/game.",
       },
       not_analyzable: {
         type: Type.BOOLEAN,
@@ -235,11 +237,11 @@ function getGeminiConfig() {
         type: Type.STRING,
         enum: ["left", "right"],
         description:
-          "If the Reddit post title brackets indicates a vote is being requested for one player (e.g., '[Blue]'), which side ('left' or 'right') you think the vote is for. Omit if no vote is requested in the title.",
+          "If the Reddit post title brackets indicates a vote is being requested for one player (e.g., '[Blue]', '[me], etc.), which side ('left' or 'right') you think the vote is for. Omit if no vote is requested in the title.",
         nullable: true,
       },
     },
-    required: ["messages", "color", "opening_name", "commentary"],
+    required: ["messages", "color", "opening_name", "comment"],
   };
 
   return {
@@ -458,13 +460,13 @@ async function getGeminiAnalysis(
     ],
     config: {
       ...dynamicConfig,
-      temperature: 0.5,
+      temperature: 1.0,
       topP: 0.98,
       responseMimeType: "application/json",
       thinkingConfig: {
         // thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
-        // thinkingBudget: 24576,
-        thinkingBudget: -1,
+        thinkingBudget: 24576,
+        // thinkingBudget: -1,
       },
       safetySettings: [
         {
@@ -580,7 +582,8 @@ const annotateAnalysisForm = Devvit.createForm(
               label: value,
               value,
             })),
-            defaultValue: [msg.classification],
+            // defaultValue: [msg.classification],
+            defaultValue: [Classification.GOOD],
           },
         ],
       })),
@@ -1049,27 +1052,31 @@ Devvit.addTrigger({
 
     if (!post || post.deleted) return;
 
+    console.log(`[${post.id}] New post in r/${subreddit?.name}.`);
+
     const geminiApiKey: string | undefined = await settings.get(
       "GEMINI_API_KEY"
     );
-    if (!geminiApiKey)
-      throw new Error("GEMINI_API_KEY not set in app settings.");
+    if (!geminiApiKey) {
+      console.error("GEMINI_API_KEY not set in app settings.");
+      return;
+    }
 
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
     const pineconeApiKey: string | undefined = await settings.get(
       "PINECONE_API_KEY"
     );
-    if (!pineconeApiKey)
-      throw new Error("PINECONE_API_KEY not set in app settings.");
+    if (!pineconeApiKey) {
+      console.error("PINECONE_API_KEY not set in app settings.");
+      return;
+    }
 
     const pc = new Pinecone({
       apiKey: pineconeApiKey,
     });
 
     const pineconeIndex = pc.Index("texting-theory");
-
-    console.log(`[${post.id}] New post in r/${subreddit?.name}.`);
 
     const dayOfWeek = new Date().toLocaleString("en-US", {
       timeZone: "America/New_York",
@@ -1170,10 +1177,6 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
-    const uid = `analysis_${post.id}`;
-
-    await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
-
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
@@ -1198,12 +1201,20 @@ Devvit.addTrigger({
       }
     }
 
-    const convoText = getConvoText(analysis.messages);
-    const embedding = await getEmbedding(ai, convoText);
+    try {
+      const convoText = getConvoText(analysis.messages);
+      const embedding = await getEmbedding(ai, convoText);
 
-    await pineconeIndex.upsert([
-      { id: post.id, values: embedding, metadata: { convoText } },
-    ]);
+      await pineconeIndex.upsert([
+        { id: post.id, values: embedding, metadata: { convoText } },
+      ]);
+    } catch (e: any) {
+      console.error("Error upserting embedding to Pinecone", e);
+    }
+
+    const uid = `analysis_${post.id}`;
+
+    await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
 
     const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
     try {
@@ -1541,7 +1552,7 @@ function buildReviewComment(
         formatting: [[1, 0, 13]],
       })
     )
-    .paragraph((p) => p.text({ text: analysis.commentary }))
+    .paragraph((p) => p.text({ text: analysis.comment }))
     .image({ mediaId })
     .paragraph((p) =>
       p.text({

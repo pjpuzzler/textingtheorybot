@@ -45,7 +45,7 @@ export type Message = {
   side: "left" | "right";
   content: string;
   classification: Classification;
-  unsent: boolean;
+  // unsent: boolean;
 };
 
 export type EloBlock = {
@@ -70,7 +70,7 @@ export type Analysis = {
   elo?: EloBlock;
   color: ColorBlock;
   opening_name: string;
-  commentary: string;
+  comment: string;
   not_analyzable: boolean;
   vote_target?: "left" | "right";
 };
