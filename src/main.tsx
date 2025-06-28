@@ -67,6 +67,9 @@ const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
+const ABOUT_THE_BOT_LINK =
+  "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/";
+
 Devvit.configure({
   http: {
     domains: ["api.pinecone.io"],
@@ -1610,7 +1613,6 @@ function buildReviewComment(
     }
   });
 
-  const aboutBotLink = `https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/`;
   return new RichTextBuilder()
     .paragraph((p) =>
       p.text({
@@ -1670,7 +1672,7 @@ function buildReviewComment(
         .link({
           text: "about the bot",
           formatting: [[32, 0, 13]],
-          url: aboutBotLink,
+          url: ABOUT_THE_BOT_LINK,
         })
     );
 }

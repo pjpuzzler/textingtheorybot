@@ -1,8 +1,8 @@
 # TextingTheory Bot
 
-> ⚠️ **Warning: This project analyzes and displays real text conversations, which may include NSFW (Not Safe For Work) or explicit content. Viewer discretion is advised.**
+> ⚠️ **Warning: This project analyzes and displays real text conversations that have been posted to Reddit, which may include NSFW (Not Safe For Work) language or topics. Viewer discretion is advised.**
 
-See it in action: [u/textingtheorybot on Reddit](https://www.reddit.com/user/textingtheorybot/)
+See it in action through its account [u/textingtheorybot](https://www.reddit.com/user/textingtheorybot/) or on any post from [r/TextingTheory](https://www.reddit.com/r/TextingTheory/)
 
 ---
 
