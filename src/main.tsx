@@ -31,23 +31,14 @@ import { getEloColor } from "./color.js";
 import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
 import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
 
-const MIN_VOTE_VALUE = 0;
-const MIN_VOTE_CLAMP = 100;
+const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
-const MAX_VOTE_CLAMP = 3000;
 const ELO_VOTE_TOLERANCE = 200;
-const MIN_VOTES_FOR_FLAIR = 3;
-const POST_FLAIR_TIME_LIMIT_MS = 1 * 60 * 60 * 1000;
+const MIN_VOTES_FOR_POST_FLAIR = 1;
 const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
-const MIN_ELO_USER_FLAIR = 1200;
 const MIN_VOTES_FOR_USER_FLAIR = 10;
 
-const REQUIRED_ELO_VOTE_INTERVAL = 5;
-const REQUIRED_ELO_VOTE_WARNING_WINDOW = 2;
-
-// const TITLE_BRACKETS_REGEX = /^\[\S(.*\S)?\]/i;
-// const TITLE_NO_VOTE_REGEX = /^\[no vote\]/i;
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
 const ELO_VOTE_REGEX = /!elo\s+(-?\d+)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
@@ -67,12 +58,9 @@ const CUSTOM_2_FLAIR_ID = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
 
 const NO_ELO_USER_FLAIR_IDS = [CUSTOM_1_FLAIR_ID, CUSTOM_2_FLAIR_ID];
 
-const REQUIRED_ELO_VOTE_REMOVAL_ID = "47c69907-6838-4e06-9371-0528ab7fabeb";
-
 const POST_DATA_PREFIX = "post_data:";
 const COMMENT_CHAIN_DATA_PREFIX = "comment_chain:";
 const VOTERS_PREFIX = "voters:";
-const NON_ELO_VOTE_COMMENT_COUNT_PREFIX = "non_elo_vote_comment_count:";
 const LEADERBOARD_KEY = "elo_leaderboard";
 
 const RENDER_INITIAL_DELAY = 15000;
@@ -239,7 +227,7 @@ function getGeminiConfig() {
         type: Type.STRING,
         enum: ["left", "right"],
         description:
-          "If the Reddit post title brackets indicates a vote is being requested for one player (e.g., '[Blue]', '[me], etc.), which side ('left' or 'right') you think the vote is for. Omit if no vote is requested in the title.",
+          "If the Reddit post title brackets indicates a vote is being requested for one player (e.g., '[Me]', '[Left]', '[Blue]' etc.), which side ('left' or 'right') you think the vote is for. Omit if no vote is requested in the title.",
         nullable: true,
       },
     },
@@ -451,7 +439,8 @@ async function getGeminiAnalysis(
   );
 
   const geminiResponse = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    // model: "gemini-2.5-flash",
+    model: "gemini-2.5-pro",
     contents: [
       createUserContent([
         `Reddit Post Title: "${postTitle}"\n\nReddit Post Body: "${
@@ -466,8 +455,8 @@ async function getGeminiAnalysis(
       topP: 0.98,
       responseMimeType: "application/json",
       thinkingConfig: {
-        // thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
-        thinkingBudget: 24576,
+        thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
+        // thinkingBudget: 24576,
         // thinkingBudget: -1,
       },
       safetySettings: [
@@ -634,7 +623,7 @@ const annotateAnalysisForm = Devvit.createForm(
         appearance: "success",
       });
     } catch (e: any) {
-      ui.showToast("An unexpected error occured.");
+      ui.showToast("An unexpected error occured");
     }
   }
 );
@@ -643,7 +632,7 @@ const annotateRedditChainForm = Devvit.createForm(
   (data) => ({
     title: "Annotate",
     description:
-      "Leave classification blank to omit message(s) (must be at the beginning)",
+      "Leave a classification blank to omit it (must be at the beginning)",
     acceptLabel: "Submit",
     fields: [
       ...data.commentChain.map((msg: RedditComment, idx: number) => ({
@@ -686,7 +675,7 @@ const annotateRedditChainForm = Devvit.createForm(
         if (!values[`classification_${i}`]) {
           if (i > 0 && values[`classification_${i - 1}`]) {
             ui.showToast(
-              "Error: Omitted messages must be at the beginning of the chain."
+              "Error: Omitted messages must be at the beginning of the chain"
             );
             await redis.del(
               `${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`
@@ -730,7 +719,7 @@ const annotateRedditChainForm = Devvit.createForm(
         appearance: "success",
       });
     } catch (e: any) {
-      ui.showToast("An unexpected error occured.");
+      ui.showToast("An unexpected error occured");
     }
 
     await redis.del(`${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`);
@@ -746,7 +735,7 @@ Devvit.addMenuItem({
 
     const postData = await redis.hGetAll(`${POST_DATA_PREFIX}${targetId}`);
     if (!postData.analysis) {
-      ui.showToast("No analysis found for this post.");
+      ui.showToast("No analysis found for this post");
       return;
     }
 
@@ -875,9 +864,7 @@ Devvit.addMenuItem({
       if (
         !analysis.elo ||
         !analysis.vote_target ||
-        !analysis.elo[analysis.vote_target] ||
-        analysis.elo[analysis.vote_target]! < MIN_VOTE_VALUE ||
-        analysis.elo[analysis.vote_target]! > MAX_VOTE_VALUE
+        !analysis.elo[analysis.vote_target]
       )
         console.log(`[${post.id}] No valid Elo found... skipping`);
       else {
@@ -1250,9 +1237,7 @@ Devvit.addTrigger({
       if (
         !analysis.elo ||
         !analysis.vote_target ||
-        !analysis.elo[analysis.vote_target] ||
-        analysis.elo[analysis.vote_target]! < MIN_VOTE_VALUE ||
-        analysis.elo[analysis.vote_target]! > MAX_VOTE_VALUE
+        !analysis.elo[analysis.vote_target]
       )
         console.log(`[${post.id}] No valid Elo found... skipping`);
       else {
@@ -1444,7 +1429,7 @@ async function handleEloVote(
 ): Promise<void> {
   const { redis, reddit, subredditName } = context;
 
-  const clampedVote = Math.max(MIN_VOTE_CLAMP, Math.min(MAX_VOTE_CLAMP, vote));
+  const clampedVote = Math.max(MIN_VOTE_VALUE, Math.min(MAX_VOTE_VALUE, vote));
 
   const postDataKey = `${POST_DATA_PREFIX}${postId}`;
 
@@ -1488,12 +1473,7 @@ async function handleEloVote(
   });
   console.log(`[${postId}] Updated global leaderboard with score: ${newElo}`);
 
-  // const timeSincePost = Date.now() - post.createdAt;
-
-  if (
-    newVoteCount >= MIN_VOTES_FOR_FLAIR
-    // || timeSincePost >= POST_FLAIR_TIME_LIMIT_MS
-  ) {
+  if (newVoteCount >= MIN_VOTES_FOR_POST_FLAIR) {
     const flairText = `${newElo} Elo (${newVoteCount} ${
       newVoteCount === 1 ? "vote" : "votes"
     })`;
@@ -1530,10 +1510,9 @@ async function handleEloVote(
       const eloUserFlairMatch = postAuthorFlair?.flairText?.match(ELO_REGEX);
       if (eloUserFlairMatch) curUserElo = parseInt(eloUserFlairMatch[1], 10);
 
-      if (
-        newElo >= MIN_ELO_USER_FLAIR &&
-        (!curUserElo || newElo > curUserElo)
-      ) {
+      if (!curUserElo && newVoteCount !== MIN_VOTES_FOR_USER_FLAIR) return;
+
+      if (!curUserElo || newElo > curUserElo) {
         const postAuthorFlair = `${newElo} Elo`;
 
         await reddit.setUserFlair({
@@ -1545,6 +1524,15 @@ async function handleEloVote(
         });
 
         console.log(`[${postId}] User flair updated to "${postAuthorFlair}"`);
+
+        if (!curUserElo) {
+          const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${postId}/`;
+          await reddit.sendPrivateMessage({
+            subject: `Your user flair on r/${subredditName} has been updated`,
+            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with an Elo of ${newElo}. Since this value is either greater than your current highest Elo or you did not previously have one, your user flair has been automatically updated. You can remove it by changing your flair to something else, or wear it like a badge of honor.`,
+            to: postAuthor.username,
+          });
+        }
       }
     } catch (e: any) {
       console.error(`[${postId}] Failed to set flair:`, e);
