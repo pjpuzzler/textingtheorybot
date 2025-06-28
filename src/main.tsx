@@ -6,7 +6,6 @@ import {
   Comment,
   SetPostFlairOptions,
 } from "@devvit/public-api";
-import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
 import {
   createPartFromBase64,
   GoogleGenAI,
@@ -29,6 +28,8 @@ import {
   RedditComment,
 } from "./analysis.js";
 import { getEloColor } from "./color.js";
+import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
+import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
 
 const MIN_VOTE_VALUE = 0;
 const MIN_VOTE_CLAMP = 100;
@@ -325,7 +326,7 @@ function getNormalizedCommentBody(
   if (comment.authorName === botUsername) {
     const usernameMatch = comment.body.match(USERNAME_REGEX);
     return usernameMatch
-      ? `[${usernameMatch[0]}'s Annotation]`
+      ? `[${usernameMatch[0]}'s annotation]`
       : "[Game Review]";
   }
 
@@ -583,8 +584,7 @@ const annotateAnalysisForm = Devvit.createForm(
               label: value,
               value,
             })),
-            // defaultValue: [msg.classification],
-            defaultValue: [Classification.GOOD],
+            defaultValue: [msg.classification],
           },
         ],
       })),
@@ -628,9 +628,9 @@ const annotateAnalysisForm = Devvit.createForm(
       });
 
       ui.showToast({
-        text: `Submitted successfully, if no result by ~${Math.floor(
+        text: `Submitted successfully, please check back in ~${Math.floor(
           (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
-        )}s, please resubmit.`,
+        )}s`,
         appearance: "success",
       });
     } catch (e: any) {
@@ -724,9 +724,9 @@ const annotateRedditChainForm = Devvit.createForm(
       });
 
       ui.showToast({
-        text: `Submitted successfully, if no result by ~${Math.floor(
+        text: `Submitted successfully, please check back in ~${Math.floor(
           (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
-        )}s, please resubmit.`,
+        )}s`,
         appearance: "success",
       });
     } catch (e: any) {
@@ -814,13 +814,19 @@ Devvit.addMenuItem({
 
     console.log(`[${post.id}] ${userId} forced analysis.`);
 
-    let analysis: Analysis | undefined;
+    let analysis: Analysis | undefined,
+      shouldVote = false;
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+
+    await redis.hSetNX(postDataKey, "elo_votes", "[]");
 
     const postData = await redis.hGetAll(postDataKey);
     if (postData.analysis) {
       analysis = JSON.parse(postData.analysis);
+      if (!analysis) return;
+
+      if (postData.elo_votes === "[]") shouldVote = true;
     } else {
       const imageUrls: string[] = [];
 
@@ -859,6 +865,35 @@ Devvit.addMenuItem({
         analysis: JSON.stringify(analysis),
       });
       console.log(`[${post.id}] Analysis stored in Redis Hash.`);
+
+      shouldVote = true;
+    }
+
+    if (shouldVote) {
+      console.log(`[${post.id}] Elo vote post detected... voting`);
+
+      if (
+        !analysis.elo ||
+        !analysis.vote_target ||
+        !analysis.elo[analysis.vote_target] ||
+        analysis.elo[analysis.vote_target]! < MIN_VOTE_VALUE ||
+        analysis.elo[analysis.vote_target]! > MAX_VOTE_VALUE
+      )
+        console.log(`[${post.id}] No valid Elo found... skipping`);
+      else {
+        try {
+          await handleEloVote(
+            context,
+            post.id,
+            post.title,
+            post.authorId!,
+            NO_ELO_USER_FLAIR_IDS[0],
+            analysis.elo[analysis.vote_target]!
+          );
+        } catch (e: any) {
+          console.error(`[${post.id}] Error handling bot vote, skipping...`, e);
+        }
+      }
     }
 
     const uid = `analysis_${post.id}`;
@@ -1031,7 +1066,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          await comment.distinguish();
+          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1064,7 +1099,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          await comment.distinguish();
+          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1224,7 +1259,10 @@ Devvit.addTrigger({
         try {
           await handleEloVote(
             context,
-            post,
+            post.id,
+            post.title,
+            post.authorId,
+            post.authorFlair?.templateId,
             analysis.elo[analysis.vote_target]!
           );
         } catch (e: any) {
@@ -1320,12 +1358,12 @@ Devvit.addTrigger({
       console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
 
-    try {
-      await pineconeIndex.deleteOne(postId);
-      console.log(`[${postId}] Pinecone entry deleted successfully.`);
-    } catch (e: any) {
-      console.error(`[${postId}] Error deleting Pinecone entry:`, e);
-    }
+    // try {
+    //   await pineconeIndex.deleteOne(postId);
+    //   console.log(`[${postId}] Pinecone entry deleted successfully.`);
+    // } catch (e: any) {
+    //   console.error(`[${postId}] Error deleting Pinecone entry:`, e);
+    // }
   },
 });
 
@@ -1333,7 +1371,6 @@ Devvit.addTrigger({
   event: "CommentCreate",
   onEvent: async (event, context) => {
     const { post, comment, author } = event;
-    const { redis, reddit, subredditName } = context;
 
     if (!post || !comment || !author) return;
 
@@ -1344,74 +1381,43 @@ Devvit.addTrigger({
       return;
 
     const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
-    const votersKey = `${VOTERS_PREFIX}${post.id}`;
-    const userGlobalCommentCountKey = `${NON_ELO_VOTE_COMMENT_COUNT_PREFIX}${author.id}`;
+    if (eloVoteMatch)
+      await handleUserEloVote(context, post, author, eloVoteMatch);
+  },
+});
 
-    // Increment global comment count for this user
-    // const count = await redis.incrBy(userGlobalCommentCountKey, 1);
+Devvit.addTrigger({
+  event: "CommentUpdate",
+  onEvent: async (event, context) => {
+    const { post, comment, previousBody, author } = event;
+    const { reddit } = context;
 
-    // if (!eloVoteMatch) {
-    //   const moderators = await reddit
-    //     .getModerators({ subredditName: subredditName! })
-    //     .all();
+    if (!post || !author) return;
 
-    //   if (
-    //     moderators.some((mod) => mod.id === author.id) ||
-    //     author.name === "TextingTheory-ModTeam" ||
-    //     author.name === "FallacyFinderBot"
-    //   )
-    //     return;
+    if (
+      comment &&
+      comment.spam &&
+      !ELO_VOTE_REGEX.test(previousBody) &&
+      ELO_VOTE_REGEX.test(comment.body)
+    ) {
+      const postComment = await reddit.getCommentById(comment.id);
+      for await (const reply of postComment.replies) {
+        if (
+          reply.authorName === "AutoModerator" &&
+          reply.body.includes("`!elo <number>`")
+        ) {
+          await reply.remove();
+          await reddit.approve(comment.id);
 
-    //   // If user is over the allowed interval and hasn't voted, remove comment and add reason
-    //   if (count > REQUIRED_ELO_VOTE_INTERVAL) {
-    //     try {
-    //       const removalMessage = await reddit.submitComment({
-    //         id: comment.id,
-    //         text: `Your comment was removed for exceeding the maximum allowed without an Elo vote (**${REQUIRED_ELO_VOTE_INTERVAL}**). Please submit a vote to continue commenting.`,
-    //       });
-    //       await removalMessage.distinguish();
-
-    //       await reddit.remove(comment.id, false);
-    //       await reddit.addRemovalNote({
-    //         itemIds: [comment.id],
-    //         reasonId: REQUIRED_ELO_VOTE_REMOVAL_ID,
-    //         modNote: `Removed for exceeding the number of comments allowed without an Elo vote (${REQUIRED_ELO_VOTE_INTERVAL})`,
-    //       });
-    //     } catch (e) {
-    //       console.error(`Failed to remove comment for user ${author.id}:`, e);
-    //     }
-    //     // If user is near the interval and hasn't voted, warn them
-    //   } else if (
-    //     count ==
-    //     REQUIRED_ELO_VOTE_INTERVAL - REQUIRED_ELO_VOTE_WARNING_WINDOW + 1
-    //   ) {
-    //     try {
-    //       const warning = await reddit.submitComment({
-    //         id: comment.id,
-    //         text: `Hi u/${author.name}, in the interest of keeping this subreddit chess-themed, commenters are required to submit an Elo vote at least every **${REQUIRED_ELO_VOTE_INTERVAL} comments** (you're currently at **${count}**). Please submit a vote before exceeding this threshold.`,
-    //       });
-    //       await warning.distinguish();
-    //     } catch (e) {
-    //       console.error(`Failed to warn user ${author.id}:`, e);
-    //     }
-    //   }
-    // } else {
-    if (eloVoteMatch) {
-      await redis.set(userGlobalCommentCountKey, "0");
-
-      const authorAccountCreatedAt = (await reddit.getUserById(author.id))!
-        .createdAt;
-      const voteValue = parseInt(eloVoteMatch[1], 10);
-
-      if (
-        // voteValue >= MIN_VOTE_VALUE &&
-        // voteValue <= MAX_VOTE_VALUE &&
-        author.id !== post.authorId &&
-        author.karma >= MIN_KARMA_TO_VOTE &&
-        Date.now() - authorAccountCreatedAt.getTime() >= MIN_AGE_TO_VOTE_MS &&
-        (await redis.hSetNX(votersKey, author.id, "1"))
-      )
-        await handleEloVote(context, post, voteValue);
+          await handleUserEloVote(
+            context,
+            post,
+            author,
+            comment.body.match(ELO_VOTE_REGEX)!
+          );
+          return;
+        }
+      }
     }
   },
 });
@@ -1430,14 +1436,17 @@ function calculateMedianEloVote(votes: number[]): number {
 
 async function handleEloVote(
   context: TriggerContext,
-  post: PostV2,
+  postId: string,
+  postTitle: string,
+  postAuthorId: string,
+  postAuthorFlairTemplateId: string | undefined,
   vote: number
 ): Promise<void> {
   const { redis, reddit, subredditName } = context;
 
   const clampedVote = Math.max(MIN_VOTE_CLAMP, Math.min(MAX_VOTE_CLAMP, vote));
 
-  const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+  const postDataKey = `${POST_DATA_PREFIX}${postId}`;
 
   const postData = await redis.hGetAll(postDataKey);
 
@@ -1470,20 +1479,20 @@ async function handleEloVote(
   });
 
   console.log(
-    `[${post.id}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes (using median center ${median}): ${newElo}`
+    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes (using median center ${median}): ${newElo}`
   );
 
   await redis.zAdd(LEADERBOARD_KEY, {
     score: newElo,
-    member: post.id,
+    member: postId,
   });
-  console.log(`[${post.id}] Updated global leaderboard with score: ${newElo}`);
+  console.log(`[${postId}] Updated global leaderboard with score: ${newElo}`);
 
-  const timeSincePost = Date.now() - post.createdAt;
+  // const timeSincePost = Date.now() - post.createdAt;
 
   if (
-    newVoteCount >= MIN_VOTES_FOR_FLAIR ||
-    timeSincePost >= POST_FLAIR_TIME_LIMIT_MS
+    newVoteCount >= MIN_VOTES_FOR_FLAIR
+    // || timeSincePost >= POST_FLAIR_TIME_LIMIT_MS
   ) {
     const flairText = `${newElo} Elo (${newVoteCount} ${
       newVoteCount === 1 ? "vote" : "votes"
@@ -1492,7 +1501,7 @@ async function handleEloVote(
     try {
       const postFlairOptions: SetPostFlairOptions = {
         subredditName: subredditName!,
-        postId: post.id,
+        postId: postId,
         text: flairText,
         textColor: "light",
       };
@@ -1501,42 +1510,79 @@ async function handleEloVote(
 
       await reddit.setPostFlair(postFlairOptions);
 
-      console.log(`[${post.id}] Flair updated to "${flairText}"`);
+      console.log(`[${postId}] Flair updated to "${flairText}"`);
 
       if (
-        !TITLE_ME_VOTE_REGEX.test(post.title) ||
+        !TITLE_ME_VOTE_REGEX.test(postTitle) ||
         newVoteCount < MIN_VOTES_FOR_USER_FLAIR ||
-        (post.authorFlair &&
-          NO_ELO_USER_FLAIR_IDS.includes(post.authorFlair.templateId))
+        (postAuthorFlairTemplateId &&
+          NO_ELO_USER_FLAIR_IDS.includes(postAuthorFlairTemplateId))
       )
         return;
 
-      const user = (await reddit.getUserById(post.authorId))!;
-      const userFlairText = await user.getUserFlairBySubreddit(subredditName!);
+      const postAuthor = (await reddit.getUserById(postAuthorId))!;
+
+      const postAuthorFlair = await postAuthor.getUserFlairBySubreddit(
+        subredditName!
+      );
 
       let curUserElo: number | undefined;
-      const eloUserFlairMatch = userFlairText?.flairText?.match(ELO_REGEX);
+      const eloUserFlairMatch = postAuthorFlair?.flairText?.match(ELO_REGEX);
       if (eloUserFlairMatch) curUserElo = parseInt(eloUserFlairMatch[1], 10);
 
       if (
         newElo >= MIN_ELO_USER_FLAIR &&
         (!curUserElo || newElo > curUserElo)
       ) {
-        const userFlairText = `${newElo} Elo`;
+        const postAuthorFlair = `${newElo} Elo`;
 
         await reddit.setUserFlair({
           subredditName: subredditName!,
-          username: user.username,
-          text: userFlairText,
+          username: postAuthor.username,
+          text: postAuthorFlair,
           backgroundColor: newEloColor,
           textColor: "light",
         });
 
-        console.log(`[${post.id}] User flair updated to "${userFlairText}"`);
+        console.log(`[${postId}] User flair updated to "${postAuthorFlair}"`);
       }
     } catch (e: any) {
-      console.error(`[${post.id}] Failed to set flair:`, e);
+      console.error(`[${postId}] Failed to set flair:`, e);
     }
+  }
+}
+
+async function handleUserEloVote(
+  context: TriggerContext,
+  post: PostV2,
+  author: UserV2,
+  eloVoteMatch: string[]
+) {
+  const { reddit, redis } = context;
+
+  const votersKey = `${VOTERS_PREFIX}${post.id}`;
+
+  const authorAccountCreatedAt = (await reddit.getUserById(author.id))!
+    .createdAt;
+  const voteValue = parseInt(eloVoteMatch[1], 10);
+
+  if (
+    author.id !== post.authorId &&
+    author.karma >= MIN_KARMA_TO_VOTE &&
+    Date.now() - authorAccountCreatedAt.getTime() >= MIN_AGE_TO_VOTE_MS &&
+    (await redis.hSetNX(votersKey, author.id, "1"))
+  ) {
+    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
+    await redis.hSetNX(postDataKey, "elo_votes", "[]");
+
+    await handleEloVote(
+      context,
+      post.id,
+      post.title,
+      post.authorId,
+      post.authorFlair?.templateId,
+      voteValue
+    );
   }
 }
 
@@ -1647,9 +1693,7 @@ function buildAnnotateComment(
 ): RichTextBuilder {
   return new RichTextBuilder()
     .image({ mediaId })
-    .paragraph((p) =>
-      p.text({ text: `Annotation by u/${requestingUsername}` })
-    );
+    .paragraph((p) => p.text({ text: `Annotated by u/${requestingUsername}` }));
 }
 
 export default Devvit;
