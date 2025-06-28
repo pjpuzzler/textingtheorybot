@@ -548,7 +548,7 @@ async function dispatchGitHubAction(
 
 const annotateAnalysisForm = Devvit.createForm(
   (data) => ({
-    title: "Annotate",
+    title: "Annotate Post",
     acceptLabel: "Submit",
     fields: [
       ...data.analysis.messages.map((msg: Message, idx: number) => ({
@@ -564,6 +564,7 @@ const annotateAnalysisForm = Devvit.createForm(
               { label: "Right", value: "right" },
             ],
             defaultValue: [msg.side],
+            required: true,
           },
           {
             name: `classification_${idx}`,
@@ -574,12 +575,14 @@ const annotateAnalysisForm = Devvit.createForm(
               value,
             })),
             defaultValue: [msg.classification],
+            required: true,
           },
         ],
       })),
       {
         name: "pm_annotation",
-        label: "PM you the result (as opposed to the bot posting it)?",
+        label: "PM you the result?",
+        helpText: "(as opposed to the bot posting it)",
         type: "boolean",
         defaultValue: false,
       },
@@ -630,7 +633,7 @@ const annotateAnalysisForm = Devvit.createForm(
 
 const annotateRedditChainForm = Devvit.createForm(
   (data) => ({
-    title: "Annotate",
+    title: "Annotate Comment",
     description:
       "Leave a classification blank to omit it (must be at the beginning)",
     acceptLabel: "Submit",
@@ -647,12 +650,14 @@ const annotateRedditChainForm = Devvit.createForm(
               label: value,
               value,
             })),
+            required: idx === data.commentChain.length - 1,
           },
         ],
       })),
       {
         name: "pm_annotation",
-        label: "PM you the result (as opposed to the bot posting it)?",
+        label: "PM you the result?",
+        helpText: "(as opposed to the bot posting it)",
         type: "boolean",
         defaultValue: false,
       },
