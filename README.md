@@ -12,6 +12,31 @@ TextingTheory Bot is a Devvit-powered Reddit app for r/TextingTheory that analyz
 - **Custom Annotations:** Users can submit their own analysis if the bot's isn't quite right.
 - **Elo Voting:** Community members can vote on the Elo rating for posts using `!elo` commands.
 
+## Changelog
+
+- Game Rating (estimated Elo)
+- Added ending classifications
+- Replaced *Missed Win* with *Miss*
+- Emoji rendering
+- Game summary table
+- Dynamic render colors
+- Render visible in comment (as opposed to Imgur link)
+- Language translation
+- Opening names
+- ~~Best continuation~~ removed, not very good
+- ~~!annotate command~~ (replaced with a Devvit menu option)
+- Updated badge colors
+- Added *Megablunder* (Mondays)
+- annotate Reddit comment chains (also three dot menu option)
+- New/updated ending classifications
+- Added *Interesting*
+- ~~Eval bar~~ (removed, doesn't really fit as part of "Game Review")
+- ~~Similar Games~~ (removed, possibly will bring back)
+- Coach's commentary
+- Devvit App - cleaner/faster workflow, stickied comments, Annotate menu option, etc.
+- Added *Superbrilliant* (Saturdays)
+- Elo vote
+
 ## How It Works
 
 1. **New Post Detection:** The bot monitors r/TextingTheory for new image posts.

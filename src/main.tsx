@@ -1058,7 +1058,6 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1091,7 +1090,6 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1149,10 +1147,7 @@ Devvit.addTrigger({
       return;
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
-    const isVotePost =
-      // TITLE_BRACKETS_REGEX.test(post.title) &&
-      // !TITLE_NO_VOTE_REGEX.test(post.title);
-      true;
+    const isVotePost = true;
 
     const newField = await redis.hSetNX(postDataKey, "elo_votes", "[]");
 
@@ -1440,14 +1435,14 @@ async function handleEloVote(
 
   const postData = await redis.hGetAll(postDataKey);
 
-  // Get all previous votes and add the new one.
+  // Get all previous votes and add the new one
   const eloVotes: number[] = JSON.parse(postData.elo_votes);
   eloVotes.push(clampedVote);
 
-  // Calculate the "center of gravity" using the median.
+  // Calculate the "center of gravity" using the median
   const median = calculateMedianEloVote(eloVotes);
 
-  // For each vote, calculate its weight based on its distance from the median.
+  // For each vote, calculate its weight based on its distance from the median
   let totalWeightedVotes = 0;
   let totalWeight = 0;
   const toleranceSquared = ELO_VOTE_TOLERANCE * ELO_VOTE_TOLERANCE;
@@ -1460,7 +1455,7 @@ async function handleEloVote(
     totalWeight += weight;
   }
 
-  // The new Elo is the final weighted average.
+  // The new Elo is the final weighted average
   const newElo = Math.round(totalWeightedVotes / totalWeight),
     newVoteCount = eloVotes.length;
 
