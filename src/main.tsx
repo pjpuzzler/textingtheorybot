@@ -67,8 +67,13 @@ const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
+const GITHUB_DISPATCH_URL =
+  "https://api.github.com/repos/pjpuzzler/textingtheory-renderer/actions/workflows/render-and-upload.yml/dispatches";
+
 const ABOUT_THE_BOT_LINK =
-  "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/";
+    "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/",
+  MORE_ANNOTATION_INFO_LINK =
+    "https://www.reddit.com/r/TextingTheory/comments/1lmnlr6/manual_annotations_guide/";
 
 Devvit.configure({
   http: {
@@ -458,7 +463,7 @@ async function getGeminiAnalysis(
       topP: 0.98,
       responseMimeType: "application/json",
       thinkingConfig: {
-        thinkingBudget: Math.round(24576 / (geminiImageParts.length * 10)),
+        thinkingBudget: 1000,
         // thinkingBudget: 24576,
         // thinkingBudget: -1,
       },
@@ -526,8 +531,7 @@ async function dispatchGitHubAction(
   const token = (await settings.get("GITHUB_TOKEN")) as string;
   if (!token) throw new Error("Missing GitHub token in the app configuration.");
 
-  const dispatchUrl = `https://api.github.com/repos/pjpuzzler/textingtheory-renderer/actions/workflows/render-and-upload.yml/dispatches`;
-  const dispatchResponse = await fetch(dispatchUrl, {
+  const dispatchResponse = await fetch(GITHUB_DISPATCH_URL, {
     method: "POST",
     headers: {
       Accept: "application/vnd.github.v3+json",
@@ -1532,9 +1536,11 @@ async function handleEloVote(
           const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${postId}/`;
           await reddit.sendPrivateMessage({
             subject: `Your user flair on r/${subredditName} has been updated`,
-            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with an Elo of ${newElo}. Since this value is either greater than your current highest Elo or you did not previously have one, your user flair has been automatically updated. You can remove it by changing your flair to something else, or wear it like a badge of honor.`,
+            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${newElo} Elo. Your user flair has been automatically updated. If you wish, you can remove it, or can choose to wear it like a badge of honor, even if it's low.`,
             to: postAuthor.username,
           });
+
+          console.log("PM sent to user");
         }
       }
     } catch (e: any) {
@@ -1666,13 +1672,25 @@ function buildReviewComment(
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is designed for comedy/entertainment only. Its reviews should not be taken seriously. ",
-          formatting: [[32, 0, 97]],
+          text: "This bot is designed for entertainment only. Its reviews should not be taken seriously. ",
+          formatting: [[32, 0, 88]],
         })
         .link({
           text: "about the bot",
           formatting: [[32, 0, 13]],
           url: ABOUT_THE_BOT_LINK,
+        })
+    )
+    .paragraph((p) =>
+      p
+        .text({
+          text: "Make your own annotation by using the three dots menu -> Annotate on either a comment or post. ",
+          formatting: [[32, 0, 95]],
+        })
+        .link({
+          text: "more info",
+          formatting: [[32, 0, 9]],
+          url: MORE_ANNOTATION_INFO_LINK,
         })
     );
 }
