@@ -820,14 +820,12 @@ Devvit.addMenuItem({
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
 
-    await redis.hSetNX(postDataKey, "elo_votes", "[]");
-
     const postData = await redis.hGetAll(postDataKey);
     if (postData.analysis) {
       analysis = JSON.parse(postData.analysis);
       if (!analysis) return;
 
-      if (postData.elo_votes === "[]") shouldVote = true;
+      if (!postData.elo_votes || postData.elo_votes === "[]") shouldVote = true;
     } else {
       const imageUrls: string[] = [];
 
@@ -1414,16 +1412,49 @@ Devvit.addTrigger({
   },
 });
 
-function calculateMedianEloVote(votes: number[]): number {
+function calculateRobustConsensusElo(votes: number[]): number {
   if (!votes.length) {
-    throw new Error("No votes provided to calculate median.");
+    throw new Error("No votes provided to calculate Elo.");
   }
-  const sorted = [...votes].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
 
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
+  const voteCount = votes.length;
+  const sortedVotes = [...votes].sort((a, b) => a - b);
+
+  // Case 1: Only one vote. Return it directly.
+  if (voteCount === 1) {
+    return sortedVotes[0];
+  }
+
+  // Case 2: Only two votes. A simple average is the only sensical option.
+  if (voteCount === 2) {
+    return Math.round((sortedVotes[0] + sortedVotes[1]) / 2);
+  }
+
+  // Case 3: Three votes. The median is the most robust against a single outlier.
+  if (voteCount === 3) {
+    return sortedVotes[1]; // The middle element is the median.
+  }
+
+  // Case 4: Four or more votes. Use the "Centered Average" of the middle 50%.
+  // We calculate how many votes to trim from each end (25% of the total).
+  const trimCount = Math.floor(voteCount * 0.25);
+
+  // Slice the sorted array to get the core consensus votes.
+  const centerSlice = sortedVotes.slice(trimCount, voteCount - trimCount);
+
+  // A safeguard, though for voteCount >= 4, this slice will not be empty.
+  if (centerSlice.length === 0) {
+    const mid = Math.floor(sortedVotes.length / 2);
+    return sortedVotes.length % 2 === 0
+      ? Math.round((sortedVotes[mid - 1] + sortedVotes[mid]) / 2)
+      : sortedVotes[mid];
+  }
+
+  // Calculate the average of this robust center slice.
+  const sumOfCenter = centerSlice.reduce((acc, vote) => acc + vote, 0);
+  const consensusAverage = sumOfCenter / centerSlice.length;
+
+  return Math.round(consensusAverage);
 }
 
 async function handleEloVote(
@@ -1439,39 +1470,21 @@ async function handleEloVote(
   const clampedVote = Math.max(MIN_VOTE_VALUE, Math.min(MAX_VOTE_VALUE, vote));
 
   const postDataKey = `${POST_DATA_PREFIX}${postId}`;
-
   const postData = await redis.hGetAll(postDataKey);
 
   // Get all previous votes and add the new one
-  const eloVotes: number[] = JSON.parse(postData.elo_votes);
+  const eloVotes: number[] = JSON.parse(postData.elo_votes || "[]");
   eloVotes.push(clampedVote);
 
-  // Calculate the "center of gravity" using the median
-  const median = calculateMedianEloVote(eloVotes);
-
-  // For each vote, calculate its weight based on its distance from the median
-  let totalWeightedVotes = 0;
-  let totalWeight = 0;
-  const toleranceSquared = ELO_VOTE_TOLERANCE * ELO_VOTE_TOLERANCE;
-
-  for (const vote of eloVotes) {
-    const distance = Math.abs(vote - median);
-    const weight = Math.exp(-(distance * distance) / (2 * toleranceSquared));
-
-    totalWeightedVotes += vote * weight;
-    totalWeight += weight;
-  }
-
-  // The new Elo is the final weighted average
-  const newElo = Math.round(totalWeightedVotes / totalWeight),
-    newVoteCount = eloVotes.length;
+  const newElo = calculateRobustConsensusElo(eloVotes);
+  const newVoteCount = eloVotes.length;
 
   await redis.hSet(postDataKey, {
     elo_votes: JSON.stringify(eloVotes),
   });
 
   console.log(
-    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes (using median center ${median}): ${newElo}`
+    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes is now: ${newElo}`
   );
 
   await redis.zAdd(LEADERBOARD_KEY, {
@@ -1508,7 +1521,6 @@ async function handleEloVote(
         return;
 
       const postAuthor = (await reddit.getUserById(postAuthorId))!;
-
       const postAuthorFlair = await postAuthor.getUserFlairBySubreddit(
         subredditName!
       );
@@ -1520,17 +1532,19 @@ async function handleEloVote(
       if (!curUserElo && newVoteCount !== MIN_VOTES_FOR_USER_FLAIR) return;
 
       if (!curUserElo || newElo > curUserElo) {
-        const postAuthorFlair = `${newElo} Elo`;
+        const postAuthorFlairText = `${newElo} Elo`;
 
         await reddit.setUserFlair({
           subredditName: subredditName!,
           username: postAuthor.username,
-          text: postAuthorFlair,
+          text: postAuthorFlairText,
           backgroundColor: newEloColor,
           textColor: "light",
         });
 
-        console.log(`[${postId}] User flair updated to "${postAuthorFlair}"`);
+        console.log(
+          `[${postId}] User flair updated to "${postAuthorFlairText}"`
+        );
 
         if (!curUserElo) {
           const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${postId}/`;
@@ -1568,10 +1582,7 @@ async function handleUserEloVote(
     author.karma >= MIN_KARMA_TO_VOTE &&
     Date.now() - authorAccountCreatedAt.getTime() >= MIN_AGE_TO_VOTE_MS &&
     (await redis.hSetNX(votersKey, author.id, "1"))
-  ) {
-    const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
-    await redis.hSetNX(postDataKey, "elo_votes", "[]");
-
+  )
     await handleEloVote(
       context,
       post.id,
@@ -1580,7 +1591,6 @@ async function handleUserEloVote(
       post.authorFlair?.templateId,
       voteValue
     );
-  }
 }
 
 function buildReviewComment(
