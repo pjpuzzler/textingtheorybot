@@ -1261,16 +1261,16 @@ Devvit.addTrigger({
       }
     }
 
-    // try {
-    //   const convoText = getConvoText(analysis.messages);
-    //   const embedding = await getEmbedding(ai, convoText);
+    try {
+      const convoText = getConvoText(analysis.messages);
+      const embedding = await getEmbedding(ai, convoText);
 
-    //   await pineconeIndex.upsert([
-    //     { id: post.id, values: embedding, metadata: { convoText } },
-    //   ]);
-    // } catch (e: any) {
-    //   console.error("Error upserting embedding to Pinecone", e);
-    // }
+      await pineconeIndex.upsert([
+        { id: post.id, values: embedding, metadata: { convoText } },
+      ]);
+    } catch (e: any) {
+      console.error("Error upserting embedding to Pinecone", e);
+    }
 
     const uid = `analysis_${post.id}`;
 
@@ -1348,12 +1348,12 @@ Devvit.addTrigger({
       console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
 
-    // try {
-    //   await pineconeIndex.deleteOne(postId);
-    //   console.log(`[${postId}] Pinecone entry deleted successfully.`);
-    // } catch (e: any) {
-    //   console.error(`[${postId}] Error deleting Pinecone entry:`, e);
-    // }
+    try {
+      await pineconeIndex.deleteOne(postId);
+      console.log(`[${postId}] Pinecone entry deleted successfully.`);
+    } catch (e: any) {
+      console.error(`[${postId}] Error deleting Pinecone entry:`, e);
+    }
   },
 });
 
