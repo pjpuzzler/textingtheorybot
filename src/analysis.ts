@@ -72,6 +72,7 @@ export type Analysis = {
   color: ColorBlock;
   opening_name: string;
   comment: string;
+  // suggestion: string;
   not_analyzable: boolean;
   vote_target?: "left" | "right";
 };

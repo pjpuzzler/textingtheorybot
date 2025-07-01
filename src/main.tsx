@@ -220,12 +220,17 @@ function getGeminiConfig() {
       },
       opening_name: {
         type: Type.STRING,
-        description: "A creative opening name for the conversation.",
+        description: "A creative opening name for the game.",
       },
       comment: {
         type: Type.STRING,
-        description: "A one-sentence comment on the conversation/game.",
+        description: "A one-sentence comment on the game.",
       },
+      // suggestion: {
+      //   type: Type.STRING,
+      //   description:
+      //     "A brilliant continuation, replacement, suggestion, etc. describing what type it is and the exact message.",
+      // },
       not_analyzable: {
         type: Type.BOOLEAN,
         description:
