@@ -33,7 +33,6 @@ import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
 
 const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
-const ELO_VOTE_TOLERANCE = 200;
 const MIN_VOTES_FOR_POST_FLAIR = 1;
 const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -77,7 +76,10 @@ const ABOUT_THE_BOT_LINK =
 
 Devvit.configure({
   http: {
-    domains: ["api.pinecone.io"],
+    domains: [
+      "api.pinecone.io",
+      "texting-theory-mw88dme.svc.aped-4627-b74a.pinecone.io",
+    ],
   },
   media: true,
   redditAPI: true,
@@ -116,10 +118,9 @@ function getGeminiConfig() {
   });
   const validClassifications = Object.values(Classification).filter(
     (c) =>
-      (c !== Classification.SUPERBRILLIANT &&
-        c !== Classification.MEGABLUNDER) ||
-      (c === Classification.SUPERBRILLIANT && dayOfWeek === "Saturday") ||
-      (c === Classification.MEGABLUNDER && dayOfWeek === "Monday")
+      c !== Classification.INTERESTING &&
+      !(c === Classification.SUPERBRILLIANT && dayOfWeek === "Saturday") &&
+      !(c === Classification.MEGABLUNDER && dayOfWeek === "Monday")
   );
 
   let finalSystemPrompt = SYSTEM_PROMPT.replace(
@@ -460,10 +461,10 @@ async function getGeminiAnalysis(
     config: {
       ...dynamicConfig,
       temperature: 1.0,
-      topP: 0.98,
+      topP: 0.97,
       responseMimeType: "application/json",
       thinkingConfig: {
-        thinkingBudget: 1000,
+        thinkingBudget: 1024,
         // thinkingBudget: 24576,
         // thinkingBudget: -1,
       },
@@ -1236,6 +1237,8 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
+    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
+
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
@@ -1261,16 +1264,16 @@ Devvit.addTrigger({
       }
     }
 
-    try {
-      const convoText = getConvoText(analysis.messages);
-      const embedding = await getEmbedding(ai, convoText);
+    // try {
+    //   const convoText = getConvoText(analysis.messages);
+    //   const embedding = await getEmbedding(ai, convoText);
 
-      await pineconeIndex.upsert([
-        { id: post.id, values: embedding, metadata: { convoText } },
-      ]);
-    } catch (e: any) {
-      console.error("Error upserting embedding to Pinecone", e);
-    }
+    //   await pineconeIndex.upsert([
+    //     { id: post.id, values: embedding, metadata: { convoText } },
+    //   ]);
+    // } catch (e: any) {
+    //   console.error("Error upserting embedding to Pinecone", e);
+    // }
 
     const uid = `analysis_${post.id}`;
 
@@ -1348,12 +1351,12 @@ Devvit.addTrigger({
       console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
 
-    try {
-      await pineconeIndex.deleteOne(postId);
-      console.log(`[${postId}] Pinecone entry deleted successfully.`);
-    } catch (e: any) {
-      console.error(`[${postId}] Error deleting Pinecone entry:`, e);
-    }
+    // try {
+    //   await pineconeIndex.deleteOne(postId);
+    //   console.log(`[${postId}] Pinecone entry deleted successfully.`);
+    // } catch (e: any) {
+    //   console.error(`[${postId}] Error deleting Pinecone entry:`, e);
+    // }
   },
 });
 
@@ -1361,18 +1364,21 @@ Devvit.addTrigger({
   event: "CommentCreate",
   onEvent: async (event, context) => {
     const { post, comment, author } = event;
+    const { reddit } = context;
 
     if (!post || !comment || !author) return;
 
-    if (
-      post.linkFlair &&
-      NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
-    )
-      return;
-
     const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
-    if (eloVoteMatch)
-      await handleUserEloVote(context, post, author, eloVoteMatch);
+    if (!eloVoteMatch) return;
+
+    const voteValue = parseInt(eloVoteMatch[1], 10);
+
+    if ([69, 420, 42069, 69420].includes(voteValue)) {
+      await reddit.remove(comment.id, false);
+      return;
+    }
+
+    await handleUserEloVote(context, post, author, voteValue);
   },
 });
 
@@ -1382,13 +1388,17 @@ Devvit.addTrigger({
     const { post, comment, previousBody, author } = event;
     const { reddit } = context;
 
-    if (!post || !author) return;
+    if (!post || !comment || !author) return;
+
+    const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
+    if (!eloVoteMatch) return;
+    const voteValue = parseInt(eloVoteMatch[1], 10);
 
     if (
-      comment &&
       comment.spam &&
       !ELO_VOTE_REGEX.test(previousBody) &&
-      ELO_VOTE_REGEX.test(comment.body)
+      eloVoteMatch
+      // && comment.parentId.startsWith("t1_")
     ) {
       const postComment = await reddit.getCommentById(comment.id);
       for await (const reply of postComment.replies) {
@@ -1397,17 +1407,15 @@ Devvit.addTrigger({
           reply.body.includes("`!elo <number>`")
         ) {
           await reply.remove();
-          await reddit.approve(comment.id);
-
-          await handleUserEloVote(
-            context,
-            post,
-            author,
-            comment.body.match(ELO_VOTE_REGEX)!
-          );
-          return;
+          break;
         }
       }
+
+      if ([69, 420, 42069, 69420].includes(voteValue)) return;
+
+      await reddit.approve(comment.id);
+
+      await handleUserEloVote(context, post, author, voteValue);
     }
   },
 });
@@ -1474,6 +1482,10 @@ async function handleEloVote(
 
   // Get all previous votes and add the new one
   const eloVotes: number[] = JSON.parse(postData.elo_votes || "[]");
+  const curElo = eloVotes.length
+    ? calculateRobustConsensusElo(eloVotes)
+    : undefined;
+
   eloVotes.push(clampedVote);
 
   const newElo = calculateRobustConsensusElo(eloVotes);
@@ -1531,7 +1543,7 @@ async function handleEloVote(
 
       if (!curUserElo && newVoteCount !== MIN_VOTES_FOR_USER_FLAIR) return;
 
-      if (!curUserElo || newElo > curUserElo) {
+      if (!curUserElo || curElo === curUserElo || newElo > curUserElo) {
         const postAuthorFlairText = `${newElo} Elo`;
 
         await reddit.setUserFlair({
@@ -1567,15 +1579,21 @@ async function handleUserEloVote(
   context: TriggerContext,
   post: PostV2,
   author: UserV2,
-  eloVoteMatch: string[]
+  voteValue: number
 ) {
+  if (
+    post.linkFlair &&
+    (NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId) ||
+      post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID)
+  )
+    return;
+
   const { reddit, redis } = context;
 
   const votersKey = `${VOTERS_PREFIX}${post.id}`;
 
   const authorAccountCreatedAt = (await reddit.getUserById(author.id))!
     .createdAt;
-  const voteValue = parseInt(eloVoteMatch[1], 10);
 
   if (
     author.id !== post.authorId &&

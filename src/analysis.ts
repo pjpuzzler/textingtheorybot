@@ -13,6 +13,7 @@ export enum Classification {
   MEGABLUNDER = "Megablunder",
   FORCED = "Forced",
   INTERESTING = "Interesting",
+  PASS = "Pass",
   ABANDON = "Abandon",
   CHECKMATED = "Checkmated",
   DRAW = "Draw",
