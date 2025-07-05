@@ -66,6 +66,10 @@ const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
+const BANNED_VOTE_VALUES = [
+  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666,
+];
+
 const GITHUB_DISPATCH_URL =
   "https://api.github.com/repos/pjpuzzler/textingtheory-renderer/actions/workflows/render-and-upload.yml/dispatches";
 
@@ -465,8 +469,8 @@ async function getGeminiAnalysis(
     ],
     config: {
       ...dynamicConfig,
-      temperature: 1.0,
-      topP: 0.97,
+      // temperature: 1.0,
+      // topP: 0.95,
       responseMimeType: "application/json",
       thinkingConfig: {
         thinkingBudget: 1024,
@@ -588,6 +592,7 @@ const annotateAnalysisForm = Devvit.createForm(
               value,
             })),
             defaultValue: [msg.classification],
+            // defaultValue: [Classification.GOOD],
             required: true,
           },
         ],
@@ -774,13 +779,17 @@ Devvit.addMenuItem({
 
     do {
       const comment = await reddit.getCommentById(nextId);
-      const redditComment: RedditComment = {
-        username: comment.authorName,
-        content: getNormalizedCommentBody(appName, comment),
-      };
-      commentChain.unshift(redditComment);
+      if (comment.authorName !== "AutoModerator") {
+        const redditComment: RedditComment = {
+          username: comment.authorName,
+          content: getNormalizedCommentBody(appName, comment),
+        };
+        commentChain.unshift(redditComment);
+      }
       nextId = comment.parentId;
     } while (nextId.startsWith("t1_"));
+
+    if (!commentChain.length) return;
 
     await redis.hSet(`${COMMENT_CHAIN_DATA_PREFIX}${targetId}_${userId}`, {
       commentChain: JSON.stringify(commentChain),
@@ -1378,7 +1387,7 @@ Devvit.addTrigger({
 
     const voteValue = parseInt(eloVoteMatch[1], 10);
 
-    if ([69, 420, 42069, 69420].includes(voteValue)) {
+    if (BANNED_VOTE_VALUES.includes(voteValue)) {
       await reddit.remove(comment.id, false);
       return;
     }
@@ -1416,7 +1425,9 @@ Devvit.addTrigger({
         }
       }
 
-      if ([69, 420, 42069, 69420].includes(voteValue)) return;
+      if (BANNED_VOTE_VALUES.includes(voteValue)) {
+        return;
+      }
 
       await reddit.approve(comment.id);
 
@@ -1508,7 +1519,6 @@ async function handleEloVote(
     score: newElo,
     member: postId,
   });
-  console.log(`[${postId}] Updated global leaderboard with score: ${newElo}`);
 
   if (newVoteCount >= MIN_VOTES_FOR_POST_FLAIR) {
     const flairText = `${newElo} Elo (${newVoteCount} ${
@@ -1718,7 +1728,10 @@ function buildReviewComment(
       p
         .text({
           text: "Make your own annotation by using the three dots menu -> Annotate on either a comment or post. ",
-          formatting: [[32, 0, 95]],
+          formatting: [
+            [32, 0, 95],
+            // [2, 67, 8],
+          ],
         })
         .link({
           text: "more info",
