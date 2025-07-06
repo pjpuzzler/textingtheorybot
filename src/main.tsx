@@ -1251,8 +1251,6 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
-    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
-
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
@@ -1288,6 +1286,8 @@ Devvit.addTrigger({
     // } catch (e: any) {
     //   console.error("Error upserting embedding to Pinecone", e);
     // }
+
+    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
 
     const uid = `analysis_${post.id}`;
 
@@ -1396,45 +1396,45 @@ Devvit.addTrigger({
   },
 });
 
-Devvit.addTrigger({
-  event: "CommentUpdate",
-  onEvent: async (event, context) => {
-    const { post, comment, previousBody, author } = event;
-    const { reddit } = context;
+// Devvit.addTrigger({
+//   event: "CommentUpdate",
+//   onEvent: async (event, context) => {
+//     const { post, comment, previousBody, author } = event;
+//     const { reddit } = context;
 
-    if (!post || !comment || !author) return;
+//     if (!post || !comment || !author) return;
 
-    const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
-    if (!eloVoteMatch) return;
-    const voteValue = parseInt(eloVoteMatch[1], 10);
+//     const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
+//     if (!eloVoteMatch) return;
+//     const voteValue = parseInt(eloVoteMatch[1], 10);
 
-    if (
-      comment.spam &&
-      !ELO_VOTE_REGEX.test(previousBody) &&
-      eloVoteMatch
-      // && comment.parentId.startsWith("t1_")
-    ) {
-      const postComment = await reddit.getCommentById(comment.id);
-      for await (const reply of postComment.replies) {
-        if (
-          reply.authorName === "AutoModerator" &&
-          reply.body.includes("`!elo <number>`")
-        ) {
-          await reply.remove();
-          break;
-        }
-      }
+//     if (
+//       comment.spam &&
+//       !ELO_VOTE_REGEX.test(previousBody) &&
+//       eloVoteMatch
+//       // && comment.parentId.startsWith("t1_")
+//     ) {
+//       const postComment = await reddit.getCommentById(comment.id);
+//       for await (const reply of postComment.replies) {
+//         if (
+//           reply.authorName === "AutoModerator" &&
+//           reply.body.includes("`!elo <number>`")
+//         ) {
+//           await reply.remove();
+//           break;
+//         }
+//       }
 
-      if (BANNED_VOTE_VALUES.includes(voteValue)) {
-        return;
-      }
+//       if (BANNED_VOTE_VALUES.includes(voteValue)) {
+//         return;
+//       }
 
-      await reddit.approve(comment.id);
+//       await reddit.approve(comment.id);
 
-      await handleUserEloVote(context, post, author, voteValue);
-    }
-  },
-});
+//       await handleUserEloVote(context, post, author, voteValue);
+//     }
+//   },
+// });
 
 function calculateRobustConsensusElo(votes: number[]): number {
   if (!votes.length) {
@@ -1598,8 +1598,8 @@ async function handleUserEloVote(
 ) {
   if (
     post.linkFlair &&
-    (NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId) ||
-      post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID)
+    NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
+    // || post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID
   )
     return;
 
