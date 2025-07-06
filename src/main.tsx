@@ -1251,6 +1251,8 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
+    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
+
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
@@ -1286,8 +1288,6 @@ Devvit.addTrigger({
     // } catch (e: any) {
     //   console.error("Error upserting embedding to Pinecone", e);
     // }
-
-    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
 
     const uid = `analysis_${post.id}`;
 
@@ -1598,8 +1598,8 @@ async function handleUserEloVote(
 ) {
   if (
     post.linkFlair &&
-    NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
-    // || post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID
+    (NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId) ||
+      post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID)
   )
     return;
 
