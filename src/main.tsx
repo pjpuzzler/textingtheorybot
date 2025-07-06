@@ -1436,7 +1436,7 @@ Devvit.addTrigger({
 //   },
 // });
 
-function calculateRobustConsensusElo(votes: number[]): number {
+function calculateConsensusElo(votes: number[]): number {
   if (!votes.length) {
     throw new Error("No votes provided to calculate Elo.");
   }
@@ -1445,19 +1445,13 @@ function calculateRobustConsensusElo(votes: number[]): number {
   const sortedVotes = [...votes].sort((a, b) => a - b);
 
   // Case 1: Only one vote. Return it directly.
-  if (voteCount === 1) {
-    return sortedVotes[0];
-  }
+  if (voteCount === 1) return sortedVotes[0];
 
   // Case 2: Only two votes. A simple average is the only sensical option.
-  if (voteCount === 2) {
-    return Math.round((sortedVotes[0] + sortedVotes[1]) / 2);
-  }
+  if (voteCount === 2) return Math.round((sortedVotes[0] + sortedVotes[1]) / 2);
 
   // Case 3: Three votes. The median is the most robust against a single outlier.
-  if (voteCount === 3) {
-    return sortedVotes[1]; // The middle element is the median.
-  }
+  if (voteCount === 3) return sortedVotes[1]; // The middle element is the median.
 
   // Case 4: Four or more votes. Use the "Centered Average" of the middle 50%.
   // We calculate how many votes to trim from each end (25% of the total).
@@ -1465,14 +1459,6 @@ function calculateRobustConsensusElo(votes: number[]): number {
 
   // Slice the sorted array to get the core consensus votes.
   const centerSlice = sortedVotes.slice(trimCount, voteCount - trimCount);
-
-  // A safeguard, though for voteCount >= 4, this slice will not be empty.
-  if (centerSlice.length === 0) {
-    const mid = Math.floor(sortedVotes.length / 2);
-    return sortedVotes.length % 2 === 0
-      ? Math.round((sortedVotes[mid - 1] + sortedVotes[mid]) / 2)
-      : sortedVotes[mid];
-  }
 
   // Calculate the average of this robust center slice.
   const sumOfCenter = centerSlice.reduce((acc, vote) => acc + vote, 0);
@@ -1498,13 +1484,11 @@ async function handleEloVote(
 
   // Get all previous votes and add the new one
   const eloVotes: number[] = JSON.parse(postData.elo_votes || "[]");
-  const curElo = eloVotes.length
-    ? calculateRobustConsensusElo(eloVotes)
-    : undefined;
+  const curElo = eloVotes.length ? calculateConsensusElo(eloVotes) : undefined;
 
   eloVotes.push(clampedVote);
 
-  const newElo = calculateRobustConsensusElo(eloVotes);
+  const newElo = calculateConsensusElo(eloVotes);
   const newVoteCount = eloVotes.length;
 
   await redis.hSet(postDataKey, {
