@@ -22,16 +22,17 @@ function rgbToHex(r: number, g: number, b: number): string {
 }
 
 const ELO_COLOR_STOPS_DATA: { elo: number; name: string; hex: string }[] = [
-  { elo: 200, name: "megablunder", hex: "#6C040C" },
-  { elo: 400, name: "blunder", hex: "#FA412D" },
-  { elo: 600, name: "mistake", hex: "#FFA459" },
-  { elo: 800, name: "inaccuracy", hex: "#F7C631" },
-  { elo: 1000, name: "good", hex: "#95B776" },
-  { elo: 1200, name: "excellent", hex: "#80B64B" },
-  { elo: 1400, name: "best", hex: "#80B64B" },
-  { elo: 1600, name: "great", hex: "#749BBF" },
-  { elo: 1800, name: "brilliant", hex: "#27C2A3" },
-  { elo: 2000, name: "superbrilliant", hex: "#E273E7" },
+  { elo: 100, name: "megablunder", hex: "#6C040C" },
+  { elo: 300, name: "blunder", hex: "#FA412D" },
+  { elo: 500, name: "miss", hex: "#EE7F6F" },
+  { elo: 700, name: "mistake", hex: "#FFA459" },
+  { elo: 900, name: "inaccuracy", hex: "#F7C631" },
+  { elo: 1100, name: "good", hex: "#95B776" },
+  { elo: 1300, name: "excellent", hex: "#80B64B" },
+  // { elo: 1500, name: "best", hex: "#80B64B" },
+  { elo: 1500, name: "great", hex: "#749BBF" },
+  { elo: 2000, name: "brilliant", hex: "#27C2A3" },
+  { elo: 3000, name: "superbrilliant", hex: "#E273E7" },
 ];
 
 const ELO_COLOR_STOPS: EloColorStop[] = ELO_COLOR_STOPS_DATA.map((stop) => ({

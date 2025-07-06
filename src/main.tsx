@@ -469,7 +469,7 @@ async function getGeminiAnalysis(
     ],
     config: {
       ...dynamicConfig,
-      // temperature: 1.0,
+      temperature: 0.75,
       // topP: 0.95,
       responseMimeType: "application/json",
       thinkingConfig: {
