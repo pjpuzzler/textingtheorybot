@@ -67,7 +67,7 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666,
+  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666, 14, 88, 1488,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -469,8 +469,8 @@ async function getGeminiAnalysis(
     ],
     config: {
       ...dynamicConfig,
-      temperature: 0.75,
-      // topP: 0.95,
+      temperature: 0,
+      // topP: 0.25,
       responseMimeType: "application/json",
       thinkingConfig: {
         thinkingBudget: 1024,
@@ -600,7 +600,7 @@ const annotateAnalysisForm = Devvit.createForm(
       {
         name: "pm_annotation",
         label: "PM you the result?",
-        helpText: "(as opposed to the bot posting it)",
+        helpText: "(as opposed to the bot posting it for you)",
         type: "boolean",
         defaultValue: false,
       },
@@ -675,7 +675,7 @@ const annotateRedditChainForm = Devvit.createForm(
       {
         name: "pm_annotation",
         label: "PM you the result?",
-        helpText: "(as opposed to the bot posting it)",
+        helpText: "(as opposed to the bot posting it for you)",
         type: "boolean",
         defaultValue: false,
       },
@@ -1015,13 +1015,10 @@ Devvit.addSchedulerJob({
     }
 
     if (type === "analysis") {
-      const richTextComment = buildReviewComment(
-        analysis as Analysis,
-        uploadResponse.mediaId
-      );
+      let post;
 
       try {
-        const post = await reddit.getPostById(originalId as string);
+        post = await reddit.getPostById(originalId as string);
         if (post.removedByCategory) {
           console.log(`[${originalId}] Post is removed, aborting.`);
           return;
@@ -1041,6 +1038,22 @@ Devvit.addSchedulerJob({
             return;
           }
         }
+
+        const reviewAnalysis = analysis as Analysis;
+
+        if (
+          TITLE_ME_VOTE_REGEX.test(post.title) &&
+          reviewAnalysis.vote_target &&
+          reviewAnalysis.color[reviewAnalysis.vote_target]
+        )
+          reviewAnalysis.color[
+            reviewAnalysis.vote_target
+          ]!.label = `u/${post.authorName}`;
+
+        const richTextComment = buildReviewComment(
+          reviewAnalysis,
+          uploadResponse.mediaId
+        );
 
         const comment = await reddit.submitComment({
           id: originalId as string,
@@ -1437,32 +1450,38 @@ Devvit.addTrigger({
 // });
 
 function calculateConsensusElo(votes: number[]): number {
-  if (!votes.length) {
+  const voteCount = votes.length;
+  if (voteCount === 0) {
     throw new Error("No votes provided to calculate Elo.");
   }
 
-  const voteCount = votes.length;
+  // Base Case: If there is only one vote, there's nothing to average.
+  if (voteCount === 1) return votes[0];
+
   const sortedVotes = [...votes].sort((a, b) => a - b);
 
-  // Case 1: Only one vote. Return it directly.
-  if (voteCount === 1) return sortedVotes[0];
+  // For all cases with 2 or more votes, use Interquartile Mean (IQM).
+  const trimProportion = 0.25;
+  const trimAmount = voteCount * trimProportion;
 
-  // Case 2: Only two votes. A simple average is the only sensical option.
-  if (voteCount === 2) return Math.round((sortedVotes[0] + sortedVotes[1]) / 2);
+  // The number of full elements to discard from each end.
+  const k = Math.floor(trimAmount);
+  // The fractional part, used for weighting the boundary elements.
+  const g = trimAmount - k;
 
-  // Case 3: Three votes. The median is the most robust against a single outlier.
-  if (voteCount === 3) return sortedVotes[1]; // The middle element is the median.
+  // Sum the core values which are guaranteed to be fully included.
+  const coreSlice = sortedVotes.slice(k + 1, voteCount - (k + 1));
+  let weightedSum = coreSlice.reduce((acc, vote) => acc + vote, 0);
 
-  // Case 4: Four or more votes. Use the "Centered Average" of the middle 50%.
-  // We calculate how many votes to trim from each end (25% of the total).
-  const trimCount = Math.floor(voteCount * 0.25);
+  // Add the partially-weighted boundary values.
+  const boundaryWeight = 1 - g;
+  weightedSum += sortedVotes[k] * boundaryWeight;
+  weightedSum += sortedVotes[voteCount - 1 - k] * boundaryWeight;
 
-  // Slice the sorted array to get the core consensus votes.
-  const centerSlice = sortedVotes.slice(trimCount, voteCount - trimCount);
+  // The denominator is the total number of "effective" votes after trimming.
+  const totalWeight = voteCount - 2 * trimAmount;
 
-  // Calculate the average of this robust center slice.
-  const sumOfCenter = centerSlice.reduce((acc, vote) => acc + vote, 0);
-  const consensusAverage = sumOfCenter / centerSlice.length;
+  const consensusAverage = weightedSum / totalWeight;
 
   return Math.round(consensusAverage);
 }
@@ -1731,7 +1750,14 @@ function buildAnnotateComment(
 ): RichTextBuilder {
   return new RichTextBuilder()
     .image({ mediaId })
-    .paragraph((p) => p.text({ text: `Annotated by u/${requestingUsername}` }));
+    .paragraph((p) => p.text({ text: `Annotated by u/${requestingUsername}` }))
+    .paragraph((p) =>
+      p.link({
+        text: "make your own",
+        formatting: [[32, 0, 13]],
+        url: MORE_ANNOTATION_INFO_LINK,
+      })
+    );
 }
 
 export default Devvit;
