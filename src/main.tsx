@@ -67,7 +67,9 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666, 14, 88, 1488,
+  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666, 14, 88, 1488, 109, 1738,
+  911, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013, 314, 31415, 1984,
+  1945, 1939,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -973,14 +975,16 @@ Devvit.addSchedulerJob({
     } = event.data!;
     const { media, reddit, scheduler, subredditName, appName } = context;
 
-    const baseUrl = "https://cdn.allthepics.net/images";
-    const datePath = formatDateAsPath(new Date());
+    const GITHUB_OWNER = "pjpuzzler";
+    const GITHUB_REPO = "textingtheory-renderer";
+    const GITHUB_BRANCH = "image-hosting";
     const filename = `${uid}.png`;
-    const imageUrl = `${baseUrl}/${datePath}/${filename}`;
+    const imageUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${filename}`;
 
     let uploadResponse;
 
     try {
+      console.log(`[${uid}] Attempting to ingest image from: ${imageUrl}`);
       uploadResponse = await media.upload({
         url: imageUrl,
         type: "image",
@@ -1580,7 +1584,7 @@ async function handleEloVote(
           const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${postId}/`;
           await reddit.sendPrivateMessage({
             subject: `Your user flair on r/${subredditName} has been updated`,
-            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${newElo} Elo. Your user flair has been automatically updated. If you wish, you can remove it, or can choose to wear it like a badge of honor, even if it's low.`,
+            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${newElo} Elo. Your user flair has been automatically updated. You can [remove it on the subreddit](https://www.reddit.com/r/TextingTheory/comments/14jo7nq/user_flairs_just_dropped/), or choose to wear it like a badge of honor, even if it's low.`,
             to: postAuthor.username,
           });
 

@@ -23,12 +23,12 @@ function rgbToHex(r: number, g: number, b: number): string {
 
 const ELO_COLOR_STOPS_DATA: { elo: number; name: string; hex: string }[] = [
   { elo: 100, name: "megablunder", hex: "#6c040d" },
-  { elo: 350, name: "blunder", hex: "#fa412d" },
+  { elo: 300, name: "blunder", hex: "#fa412d" },
   // { elo: 500, name: "miss", hex: "#ff7769" },
   { elo: 600, name: "mistake", hex: "#ffa459" },
-  { elo: 850, name: "inaccuracy", hex: "#f7c631" },
-  { elo: 1100, name: "good", hex: "#95b776" },
-  { elo: 1350, name: "excellent", hex: "#81b64c" },
+  { elo: 800, name: "inaccuracy", hex: "#f7c631" },
+  { elo: 1000, name: "good", hex: "#95b776" },
+  { elo: 1200, name: "excellent", hex: "#81b64c" },
   // { elo: 1500, name: "best", hex: "#81b64c" },
   { elo: 1600, name: "great", hex: "#749bbf" },
   { elo: 2000, name: "brilliant", hex: "#26c2a3" },
