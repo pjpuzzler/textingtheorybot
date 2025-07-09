@@ -68,8 +68,8 @@ const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
   69, 6969, 696969, 420, 42069, 69420, 1234, 123, 4321, 321, 666, 14, 88, 1488,
-  109, 1738, 911, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013, 314,
-  31415, 1984, 1945, 1939,
+  109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013,
+  314, 31415, 1984, 1945, 1939,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -1735,7 +1735,7 @@ function buildReviewComment(
           formatting: [[32, 0, 3]],
         })
         .link({
-          text: "make an annotation",
+          text: "manual annotations",
           formatting: [[32, 0, 18]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
