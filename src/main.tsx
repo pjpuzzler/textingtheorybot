@@ -6,6 +6,8 @@ import {
   Comment,
   SetPostFlairOptions,
 } from "@devvit/public-api";
+import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
+import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
 import {
   createPartFromBase64,
   GoogleGenAI,
@@ -28,8 +30,6 @@ import {
   RedditComment,
 } from "./analysis.js";
 import { getEloColor } from "./color.js";
-import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
-import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
 
 const MIN_VOTE_VALUE = 100;
 const MAX_VOTE_VALUE = 3000;
@@ -1490,6 +1490,14 @@ function calculateConsensusElo(votes: number[]): number {
   return Math.round(consensusAverage);
 }
 
+function getTitleEmoji(elo: number): string {
+  if (elo >= 2500) return ":gm:";
+  if (elo >= 2400) return ":im:";
+  if (elo >= 2300) return ":fm:";
+  if (elo >= 2200) return ":cm:";
+  return "";
+}
+
 async function handleEloVote(
   context: TriggerContext,
   postId: string,
@@ -1566,7 +1574,7 @@ async function handleEloVote(
       if (!curUserElo && newVoteCount !== MIN_VOTES_FOR_USER_FLAIR) return;
 
       if (!curUserElo || curElo === curUserElo || newElo > curUserElo) {
-        const postAuthorFlairText = `${newElo} Elo`;
+        const postAuthorFlairText = `${getTitleEmoji(newElo)}${newElo} Elo`;
 
         await reddit.setUserFlair({
           subredditName: subredditName!,

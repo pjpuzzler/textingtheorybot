@@ -21,6 +21,8 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+const TITLED_HEX = "#722f2c";
+
 const ELO_COLOR_STOPS_DATA: { elo: number; name: string; hex: string }[] = [
   { elo: 100, name: "megablunder", hex: "#6c040d" },
   { elo: 300, name: "blunder", hex: "#fa412d" },
@@ -30,9 +32,9 @@ const ELO_COLOR_STOPS_DATA: { elo: number; name: string; hex: string }[] = [
   { elo: 1000, name: "good", hex: "#95b776" },
   { elo: 1200, name: "excellent", hex: "#81b64c" },
   // { elo: 1500, name: "best", hex: "#81b64c" },
-  { elo: 1600, name: "great", hex: "#749bbf" },
-  { elo: 2000, name: "brilliant", hex: "#26c2a3" },
-  { elo: 3000, name: "superbrilliant", hex: "#e273e7" },
+  { elo: 1500, name: "great", hex: "#749bbf" },
+  { elo: 1800, name: "brilliant", hex: "#26c2a3" },
+  { elo: 2200, name: "superbrilliant", hex: "#e273e7" },
 ];
 
 const ELO_COLOR_STOPS: EloColorStop[] = ELO_COLOR_STOPS_DATA.map((stop) => ({
@@ -42,6 +44,8 @@ const ELO_COLOR_STOPS: EloColorStop[] = ELO_COLOR_STOPS_DATA.map((stop) => ({
 }));
 
 export function getEloColor(elo: number): string {
+  if (elo >= 2200) return TITLED_HEX;
+
   const minElo = ELO_COLOR_STOPS[0].elo;
   const maxElo = ELO_COLOR_STOPS[ELO_COLOR_STOPS.length - 1].elo;
   const clampedElo = Math.max(minElo, Math.min(elo, maxElo));
