@@ -67,9 +67,9 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 666, 14, 88, 1488, 109, 1738,
-  911, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013, 314, 31415, 1984,
-  1945, 1939,
+  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 4321, 321, 666, 14, 88, 1488,
+  109, 1738, 911, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013, 314,
+  31415, 1984, 1945, 1939,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -122,12 +122,12 @@ function getGeminiConfig() {
     timeZone: "America/New_York",
     weekday: "long",
   });
-  const validClassifications = Object.values(Classification).filter(
-    (c) =>
-      c !== Classification.INTERESTING &&
-      !(c === Classification.SUPERBRILLIANT && dayOfWeek === "Saturday") &&
-      !(c === Classification.MEGABLUNDER && dayOfWeek === "Monday")
-  );
+  const validClassifications = Object.values(Classification).filter((c) => {
+    if (c === Classification.INTERESTING) return false;
+    if (c === Classification.MEGABLUNDER) return dayOfWeek === "Monday";
+    if (c === Classification.SUPERBRILLIANT) return dayOfWeek === "Saturday";
+    return true;
+  });
 
   let finalSystemPrompt = SYSTEM_PROMPT.replace(
     "// ANCHOR_FOR_SUPERBRILLIANT",
@@ -292,9 +292,9 @@ function normalizeClassifications(analysis: Analysis): void {
       msg.classification === Classification.BOOK &&
       i > 0 &&
       prev.classification !== Classification.BOOK
-    ) {
+    )
       msg.classification = Classification.GOOD;
-    }
+
     if (
       isFinalizing(msg.classification) &&
       (i < messages.length - 2 ||
@@ -303,16 +303,18 @@ function normalizeClassifications(analysis: Analysis): void {
             next.classification === Classification.WINNER &&
             next.side !== msg.side
           )))
-    ) {
+    )
       msg.classification = Classification.GOOD;
-    }
+
     if (
       msg.classification === Classification.WINNER &&
-      (i < messages.length - 1 ||
-        !(prev && prev.side !== msg.side && isFinalizing(prev.classification)))
-    ) {
+      // (
+      i < messages.length - 1
+      // || !(prev && prev.side !== msg.side && isFinalizing(prev.classification))
+      // )
+    )
       msg.classification = Classification.GOOD;
-    }
+
     if (
       msg.classification === Classification.DRAW &&
       (i < messages.length - 2 ||
@@ -321,9 +323,8 @@ function normalizeClassifications(analysis: Analysis): void {
             next.classification === Classification.DRAW &&
             next.side !== msg.side
           )))
-    ) {
+    )
       msg.classification = Classification.GOOD;
-    }
   }
 }
 
@@ -975,11 +976,10 @@ Devvit.addSchedulerJob({
     } = event.data!;
     const { media, reddit, scheduler, subredditName, appName } = context;
 
-    const GITHUB_OWNER = "pjpuzzler";
-    const GITHUB_REPO = "textingtheory-renderer";
-    const GITHUB_BRANCH = "image-hosting";
+    const baseUrl = "https://cdn.allthepics.net/images";
+    const datePath = formatDateAsPath(new Date());
     const filename = `${uid}.png`;
-    const imageUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${filename}`;
+    const imageUrl = `${baseUrl}/${datePath}/${filename}`;
 
     let uploadResponse;
 
@@ -1730,19 +1730,13 @@ function buildReviewComment(
           formatting: [[32, 0, 13]],
           url: ABOUT_THE_BOT_LINK,
         })
-    )
-    .paragraph((p) =>
-      p
         .text({
-          text: "Make your own annotation by using the three dots menu -> Annotate on either a comment or post. ",
-          formatting: [
-            [32, 0, 95],
-            // [2, 67, 8],
-          ],
+          text: " | ",
+          formatting: [[32, 0, 3]],
         })
         .link({
-          text: "more info",
-          formatting: [[32, 0, 9]],
+          text: "make an annotation",
+          formatting: [[32, 0, 18]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
     );
