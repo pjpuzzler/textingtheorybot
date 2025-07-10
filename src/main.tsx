@@ -1,10 +1,10 @@
 import {
   Devvit,
-  TriggerContext,
-  SettingScope,
-  RichTextBuilder,
   Comment,
+  RichTextBuilder,
   SetPostFlairOptions,
+  SettingScope,
+  TriggerContext,
 } from "@devvit/public-api";
 import { PostV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/postv2.js";
 import { UserV2 } from "@devvit/protos/types/devvit/reddit/v2alpha/userv2.js";
@@ -68,8 +68,8 @@ const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
   69, 6969, 696969, 420, 42069, 69420, 1234, 123, 4321, 321, 666, 14, 88, 1488,
-  109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 123456, 177013,
-  314, 31415, 1984, 1945, 1939,
+  109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 12345, 123456,
+  177013, 314, 31415, 1984, 1945, 1939,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -473,7 +473,6 @@ async function getGeminiAnalysis(
     config: {
       ...dynamicConfig,
       temperature: 0,
-      // topP: 0.25,
       responseMimeType: "application/json",
       thinkingConfig: {
         thinkingBudget: 1024,
@@ -590,12 +589,19 @@ const annotateAnalysisForm = Devvit.createForm(
             name: `classification_${idx}`,
             type: "select",
             label: "Classification",
-            options: Object.values(Classification).map((value) => ({
-              label: value,
-              value,
-            })),
+            options: Object.values(Classification)
+              .filter((c) => {
+                if (c === Classification.MEGABLUNDER)
+                  return msg.classification === Classification.MEGABLUNDER;
+                if (c === Classification.SUPERBRILLIANT)
+                  return msg.classification === Classification.SUPERBRILLIANT;
+                return true;
+              })
+              .map((value) => ({
+                label: value,
+                value,
+              })),
             defaultValue: [msg.classification],
-            // defaultValue: [Classification.GOOD],
             required: true,
           },
         ],
@@ -667,10 +673,16 @@ const annotateRedditChainForm = Devvit.createForm(
             name: `classification_${idx}`,
             type: "select",
             label: "Classification",
-            options: Object.values(Classification).map((value) => ({
-              label: value,
-              value,
-            })),
+            options: Object.values(Classification)
+              .filter(
+                (c) =>
+                  c !== Classification.MEGABLUNDER &&
+                  c !== Classification.SUPERBRILLIANT
+              )
+              .map((value) => ({
+                label: value,
+                value,
+              })),
             required: idx === data.commentChain.length - 1,
           },
         ],
@@ -803,21 +815,12 @@ Devvit.addMenuItem({
 });
 
 Devvit.addMenuItem({
-  label: "Force Analysis (Mod Only)",
+  label: "Force Analysis",
   location: "post",
+  forUserType: "moderator",
   onPress: async (event, context) => {
     const { targetId } = event;
-    const { redis, reddit, scheduler, settings, subredditName, userId, ui } =
-      context;
-
-    const moderators = await reddit
-      .getModerators({ subredditName: subredditName! })
-      .all();
-
-    if (!moderators.some((mod) => mod.id === userId)) {
-      ui.showToast("Error: Invalid permissions");
-      return;
-    }
+    const { redis, reddit, scheduler, settings, userId, ui } = context;
 
     const geminiApiKey: string | undefined = await settings.get(
       "GEMINI_API_KEY"
@@ -886,6 +889,8 @@ Devvit.addMenuItem({
       shouldVote = true;
     }
 
+    if (post.flair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
+
     if (shouldVote) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
@@ -936,20 +941,12 @@ Devvit.addMenuItem({
 });
 
 Devvit.addMenuItem({
-  label: "Delete Saved Analysis (Mod Only)",
+  label: "Delete Saved Analysis",
   location: "post",
+  forUserType: "moderator",
   onPress: async (event, context) => {
     const { targetId } = event;
-    const { redis, reddit, subredditName, userId, ui } = context;
-
-    const moderators = await reddit
-      .getModerators({ subredditName: subredditName! })
-      .all();
-
-    if (!moderators.some((mod) => mod.id === userId)) {
-      ui.showToast("Error: Invalid permissions");
-      return;
-    }
+    const { redis, reddit, userId, ui } = context;
 
     const post = await reddit.getPostById(targetId);
 
@@ -1404,7 +1401,7 @@ Devvit.addTrigger({
 
     const voteValue = parseInt(eloVoteMatch[1], 10);
 
-    if (BANNED_VOTE_VALUES.includes(voteValue)) {
+    if (badVoteValue(voteValue)) {
       await reddit.remove(comment.id, false);
       return;
     }
@@ -1442,9 +1439,8 @@ Devvit.addTrigger({
 //         }
 //       }
 
-//       if (BANNED_VOTE_VALUES.includes(voteValue)) {
+//       if (badVoteValue(voteValue))
 //         return;
-//       }
 
 //       await reddit.approve(comment.id);
 
@@ -1452,6 +1448,10 @@ Devvit.addTrigger({
 //     }
 //   },
 // });
+
+function badVoteValue(voteValue: number): boolean {
+  return voteValue >= 4000 || BANNED_VOTE_VALUES.includes(Math.abs(voteValue));
+}
 
 function calculateConsensusElo(votes: number[]): number {
   const voteCount = votes.length;
@@ -1665,13 +1665,9 @@ function buildReviewComment(
   analysis.messages.forEach((msg: Message) => {
     if (msg.side === "left") hasLeft = true;
     else if (msg.side === "right") hasRight = true;
-    let effectiveClassification =
-      msg.classification === Classification.FORCED
-        ? Classification.GOOD
-        : msg.classification;
-    if (effectiveClassification in counts) {
-      let countedClassification =
-        effectiveClassification as CountedClassification;
+
+    if (msg.classification in counts) {
+      let countedClassification = msg.classification as CountedClassification;
       if (msg.side === "left") counts[countedClassification].left++;
       else if (msg.side === "right") counts[countedClassification].right++;
     }
@@ -1743,8 +1739,8 @@ function buildReviewComment(
           formatting: [[32, 0, 3]],
         })
         .link({
-          text: "manual annotations",
-          formatting: [[32, 0, 18]],
+          text: "annotate menu",
+          formatting: [[32, 0, 13]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
     );
