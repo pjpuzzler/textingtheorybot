@@ -72,7 +72,7 @@ const MAX_RENDER_POLL_ATTEMPTS = 5;
 const BANNED_VOTE_VALUES = [
   69, 6969, 696969, 420, 42069, 69420, 1234, 123, 4321, 321, 666, 14, 88, 1488,
   109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 12345, 123456,
-  177013, 314, 31415, 1984, 1945, 1939,
+  31415, 1984, 1945, 1939, 1914,
 ];
 
 const GITHUB_DISPATCH_URL =
@@ -80,6 +80,8 @@ const GITHUB_DISPATCH_URL =
 
 const ABOUT_THE_BOT_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/",
+  ICON_MEANINGS_LINK =
+    "https://www.reddit.com/r/TextingTheory/comments/1ksad21/classifications_badges_explained/",
   MORE_ANNOTATION_INFO_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1lmnlr6/manual_annotations_guide/";
 
@@ -154,7 +156,6 @@ function getGeminiConfig() {
               type: Type.STRING,
               enum: validClassifications,
             },
-            // unsent: { type: Type.BOOLEAN, nullable: true },
           },
           required: ["side", "content", "classification"],
         },
@@ -1786,8 +1787,8 @@ function buildReviewComment(
           formatting: [[32, 0, 89]],
         })
         .link({
-          text: "about the bot",
-          formatting: [[32, 0, 13]],
+          text: "about",
+          formatting: [[32, 0, 5]],
           url: ABOUT_THE_BOT_LINK,
         })
         .text({
@@ -1795,8 +1796,17 @@ function buildReviewComment(
           formatting: [[32, 0, 3]],
         })
         .link({
-          text: "annotate",
-          formatting: [[32, 0, 8]],
+          text: "icons explained",
+          formatting: [[32, 0, 15]],
+          url: ICON_MEANINGS_LINK,
+        })
+        .text({
+          text: " | ",
+          formatting: [[32, 0, 3]],
+        })
+        .link({
+          text: "make your own",
+          formatting: [[32, 0, 13]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
     );

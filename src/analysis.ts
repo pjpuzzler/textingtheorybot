@@ -45,7 +45,6 @@ export type Message = {
   side: "left" | "right";
   content: string;
   classification: Classification;
-  // unsent: boolean;
 };
 
 export type EloBlock = {
