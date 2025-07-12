@@ -57,10 +57,13 @@ const CUSTOM_2_FLAIR_ID = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
 
 const NO_ELO_USER_FLAIR_IDS = [CUSTOM_1_FLAIR_ID, CUSTOM_2_FLAIR_ID];
 
+const TEXTFISH_FLAIR_TEMPLATE_ID = "65d18ba6-5e8c-11f0-ba88-065f6e5afca9";
+
 const POST_DATA_PREFIX = "post_data:";
 const COMMENT_CHAIN_DATA_PREFIX = "comment_chain:";
 const VOTERS_PREFIX = "voters:";
 const LEADERBOARD_KEY = "elo_leaderboard";
+const ANALYSIS_COUNT_KEY = "analysis_count";
 
 const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
@@ -261,13 +264,12 @@ function getGeminiConfig() {
 }
 
 function formatDateAsPath(date: Date): string {
-  const options: Intl.DateTimeFormatOptions = {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  };
-  const formatter = new Intl.DateTimeFormat("en-CA", options);
+  });
   const parts = formatter.formatToParts(date);
   const year = parts.find((p) => p.type === "year")?.value;
   const month = parts.find((p) => p.type === "month")?.value;
@@ -971,7 +973,7 @@ Devvit.addSchedulerJob({
       requestingUserId,
       pmAnnotation,
     } = event.data!;
-    const { media, reddit, scheduler, subredditName, appName } = context;
+    const { media, reddit, redis, scheduler, subredditName, appName } = context;
 
     const baseUrl = "https://cdn.allthepics.net/images";
     const datePath = formatDateAsPath(new Date());
@@ -1063,6 +1065,20 @@ Devvit.addSchedulerJob({
         await comment.distinguish(true);
 
         console.log(`✅ [${uid}] Successfully posted analysis comment.`);
+
+        const newCount = await redis.incrBy(ANALYSIS_COUNT_KEY, 1);
+
+        const flairText = `:textfish:Textfish | ${Intl.NumberFormat(
+          "en-US"
+        ).format(newCount)} Games Analyzed`;
+        await reddit.setUserFlair({
+          subredditName: subredditName!,
+          username: appName,
+          text: flairText,
+          flairTemplateId: TEXTFISH_FLAIR_TEMPLATE_ID,
+        });
+
+        console.log(`[${uid}] Bot flair updated to "${flairText}".`);
       } catch (e: any) {
         console.error(
           `[${uid}] Error commenting analysis: ${e.message}`,
@@ -1092,6 +1108,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
+          await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1124,6 +1141,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
+          await comment.distinguish(true);
         }
       } catch (e: any) {
         console.error(
@@ -1641,6 +1659,48 @@ async function handleUserEloVote(
     );
 }
 
+function getAccuracyString(
+  messages: Message[],
+  side: "left" | "right"
+): string {
+  const scores: Record<CountedClassification, number> = {
+    [Classification.SUPERBRILLIANT]: 100,
+    [Classification.BRILLIANT]: 100,
+    [Classification.GREAT]: 100,
+    [Classification.BEST]: 100,
+    [Classification.EXCELLENT]: 98,
+    [Classification.GOOD]: 95,
+    [Classification.BOOK]: 100,
+    [Classification.INACCURACY]: -10,
+    [Classification.MISTAKE]: -20,
+    [Classification.MISS]: -10,
+    [Classification.BLUNDER]: -100,
+    [Classification.MEGABLUNDER]: -100,
+  };
+
+  let totalScore = 0;
+  let classifiedMovesCount = 0;
+
+  const playerMessages = messages.filter((message) => message.side === side);
+
+  for (const message of playerMessages) {
+    if (message.classification in scores) {
+      totalScore += scores[message.classification as CountedClassification];
+      classifiedMovesCount++;
+    }
+  }
+
+  if (classifiedMovesCount === 0) {
+    return "N/A";
+  }
+
+  const averageAccuracy = totalScore / classifiedMovesCount;
+
+  const clampedAccuracy = Math.max(0, averageAccuracy);
+
+  return `${clampedAccuracy.toFixed(1)}%`;
+}
+
 function buildReviewComment(
   analysis: Analysis,
   mediaId: string
@@ -1706,6 +1766,29 @@ function buildReviewComment(
               (analysis.elo?.right ? ` (${analysis.elo.right})` : ""),
           })
         );
+
+      table.row((row) => {
+        if (hasLeft)
+          row.cell((cell) =>
+            cell.text({
+              text: getAccuracyString(analysis.messages, "left"),
+            })
+          );
+        row.cell((cell) => cell.text({ text: "Accuracy" }));
+        if (hasRight)
+          row.cell((cell) =>
+            cell.text({
+              text: getAccuracyString(analysis.messages, "right"),
+            })
+          );
+      });
+
+      table.row((row) => {
+        if (hasLeft) row.cell(() => {});
+        row.cell(() => {});
+        if (hasRight) row.cell(() => {});
+      });
+
       Object.entries(counts).forEach(([key, value]) => {
         if (
           (key == Classification.SUPERBRILLIANT ||
