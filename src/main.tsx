@@ -41,7 +41,7 @@ const MIN_VOTES_FOR_USER_FLAIR = 10;
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
 const ELO_VOTE_REGEX = /!elo\s+(-?\d+)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
-const USERNAME_REGEX = /u\/[A-Za-z0-9_-]+/;
+const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
 
 const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
   ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
@@ -235,17 +235,6 @@ function getGeminiConfig() {
         type: Type.STRING,
         description: "A one-sentence comment on the game.",
       },
-      // suggestion: {
-      //   type: Type.STRING,
-      //   description:
-      //     "A brilliant continuation, replacement, suggestion, etc. describing what type it is and the exact message.",
-      // },
-      not_analyzable: {
-        type: Type.BOOLEAN,
-        description:
-          "true only if the input image(s) are not a conversation. Omit otherwise.",
-        nullable: true,
-      },
       vote_target: {
         type: Type.STRING,
         enum: ["left", "right"],
@@ -335,9 +324,9 @@ function getNormalizedCommentBody(
   comment: Comment
 ): string {
   if (comment.authorName === botUsername) {
-    const usernameMatch = comment.body.match(USERNAME_REGEX);
-    return usernameMatch
-      ? `[${usernameMatch[0]}'s annotation]`
+    const annotationMatch = comment.body.match(ANNOTATION_REGEX);
+    return annotationMatch
+      ? `[${annotationMatch[1]}'s annotation]`
       : "[Game Review]";
   }
 
@@ -874,13 +863,6 @@ Devvit.addMenuItem({
         return;
       }
 
-      if (analysis.not_analyzable) {
-        console.log(
-          `[${post.id}] Gemini determined this is not analyzable. Skipping.`
-        );
-        return;
-      }
-
       normalizeClassifications(analysis);
 
       await redis.hSet(postDataKey, {
@@ -1033,7 +1015,7 @@ Devvit.addSchedulerJob({
           if (
             postComment.authorName === appName &&
             !postComment.removed &&
-            !USERNAME_REGEX.test(postComment.body)
+            !ANNOTATION_REGEX.test(postComment.body)
           ) {
             console.log(
               `[${originalId}] Already posted a comment to this post, aborting.`
@@ -1268,13 +1250,6 @@ Devvit.addTrigger({
     );
 
     if (!analysis) return;
-
-    if (analysis.not_analyzable) {
-      console.log(
-        `[${post.id}] Gemini determined this is not analyzable. Skipping.`
-      );
-      return;
-    }
 
     normalizeClassifications(analysis);
 
@@ -1668,13 +1643,13 @@ function getAccuracyString(
     [Classification.BRILLIANT]: 100,
     [Classification.GREAT]: 100,
     [Classification.BEST]: 100,
-    [Classification.EXCELLENT]: 98,
-    [Classification.GOOD]: 95,
+    [Classification.EXCELLENT]: 99,
+    [Classification.GOOD]: 96.5,
     [Classification.BOOK]: 100,
-    [Classification.INACCURACY]: -10,
-    [Classification.MISTAKE]: -20,
+    [Classification.INACCURACY]: -7.5,
+    [Classification.MISTAKE]: -15,
     [Classification.MISS]: -10,
-    [Classification.BLUNDER]: -100,
+    [Classification.BLUNDER]: -60,
     [Classification.MEGABLUNDER]: -100,
   };
 
@@ -1690,15 +1665,13 @@ function getAccuracyString(
     }
   }
 
-  if (classifiedMovesCount === 0) {
-    return "N/A";
-  }
+  if (classifiedMovesCount === 0) return "N/A";
 
   const averageAccuracy = totalScore / classifiedMovesCount;
 
-  const clampedAccuracy = Math.max(0, averageAccuracy);
+  const clampedAccuracy = Math.min(100, Math.max(0, averageAccuracy));
 
-  return `${clampedAccuracy.toFixed(1)}%`;
+  return clampedAccuracy.toFixed(1);
 }
 
 function buildReviewComment(
@@ -1809,8 +1782,8 @@ function buildReviewComment(
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is designed for entertainment only. Its reviews should not be taken seriously. ",
-          formatting: [[32, 0, 88]],
+          text: "This bot is designed for entertainment only, its reviews should not be taken seriously | ",
+          formatting: [[32, 0, 89]],
         })
         .link({
           text: "about the bot",
@@ -1822,8 +1795,8 @@ function buildReviewComment(
           formatting: [[32, 0, 3]],
         })
         .link({
-          text: "annotate menu",
-          formatting: [[32, 0, 13]],
+          text: "annotate",
+          formatting: [[32, 0, 8]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
     );
