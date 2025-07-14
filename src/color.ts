@@ -30,10 +30,10 @@ const ELO_COLOR_STOPS_DATA: { elo: number; name: string; hex: string }[] = [
   { elo: 600, name: "mistake", hex: "#ffa459" },
   { elo: 800, name: "inaccuracy", hex: "#f7c631" },
   { elo: 1000, name: "good", hex: "#95b776" },
-  { elo: 1200, name: "excellent", hex: "#81b64c" },
+  { elo: 1300, name: "excellent", hex: "#81b64c" },
   // { elo: 1500, name: "best", hex: "#81b64c" },
-  { elo: 1500, name: "great", hex: "#749bbf" },
-  { elo: 1800, name: "brilliant", hex: "#26c2a3" },
+  { elo: 1600, name: "great", hex: "#749bbf" },
+  { elo: 1900, name: "brilliant", hex: "#26c2a3" },
   { elo: 2200, name: "superbrilliant", hex: "#e273e7" },
 ];
 

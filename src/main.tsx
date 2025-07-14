@@ -42,6 +42,7 @@ const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
 const ELO_VOTE_REGEX = /!elo\s+(-?\d+)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
 const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
+const IMPLIED_MESSAGE_REGEX = /^\*.*\*$/;
 
 const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
   ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
@@ -74,6 +75,24 @@ const BANNED_VOTE_VALUES = [
   109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 12345, 123456,
   31415, 1984, 1945, 1939, 1914,
 ];
+
+const CLASSIFICATION_ACCURACY_INFO: Record<
+  CountedClassification,
+  { accuracy: number; radius: number }
+> = {
+  [Classification.SUPERBRILLIANT]: { accuracy: 100, radius: 0 },
+  [Classification.BRILLIANT]: { accuracy: 100, radius: 0 },
+  [Classification.GREAT]: { accuracy: 100, radius: 0 },
+  [Classification.BEST]: { accuracy: 100, radius: 0 },
+  [Classification.EXCELLENT]: { accuracy: 99, radius: 1 },
+  [Classification.GOOD]: { accuracy: 96.5, radius: 1.5 },
+  [Classification.BOOK]: { accuracy: 100, radius: 2 },
+  [Classification.INACCURACY]: { accuracy: -7.5, radius: 2.5 },
+  [Classification.MISTAKE]: { accuracy: -15, radius: 5 },
+  [Classification.MISS]: { accuracy: -10, radius: 3 },
+  [Classification.BLUNDER]: { accuracy: -60, radius: 40 },
+  [Classification.MEGABLUNDER]: { accuracy: -100, radius: 0 },
+};
 
 const GITHUB_DISPATCH_URL =
   "https://api.github.com/repos/pjpuzzler/textingtheory-renderer/actions/workflows/render-and-upload.yml/dispatches";
@@ -166,12 +185,16 @@ function getGeminiConfig() {
         nullable: true,
         properties: {
           left: {
-            type: Type.NUMBER,
+            type: Type.INTEGER,
+            minimum: 100,
+            maximum: 3000,
             description: `Estimated Elo (integer) for the "left" player.`,
             nullable: true,
           },
           right: {
-            type: Type.NUMBER,
+            type: Type.INTEGER,
+            minimum: 100,
+            maximum: 3000,
             description: `Estimated Elo (integer) for the "right" player.`,
             nullable: true,
           },
@@ -1635,33 +1658,28 @@ async function handleUserEloVote(
     );
 }
 
+function getClassificationAccuracy(
+  classification: CountedClassification
+): number {
+  const { accuracy, radius } = CLASSIFICATION_ACCURACY_INFO[classification];
+  const jitter = (Math.random() * 2 - 1) * radius;
+  return Math.min(100, accuracy + jitter);
+}
+
 function getAccuracyString(
   messages: Message[],
   side: "left" | "right"
 ): string {
-  const scores: Record<CountedClassification, number> = {
-    [Classification.SUPERBRILLIANT]: 100,
-    [Classification.BRILLIANT]: 100,
-    [Classification.GREAT]: 100,
-    [Classification.BEST]: 100,
-    [Classification.EXCELLENT]: 99,
-    [Classification.GOOD]: 96.5,
-    [Classification.BOOK]: 100,
-    [Classification.INACCURACY]: -7.5,
-    [Classification.MISTAKE]: -15,
-    [Classification.MISS]: -10,
-    [Classification.BLUNDER]: -60,
-    [Classification.MEGABLUNDER]: -100,
-  };
-
   let totalScore = 0;
   let classifiedMovesCount = 0;
 
   const playerMessages = messages.filter((message) => message.side === side);
 
   for (const message of playerMessages) {
-    if (message.classification in scores) {
-      totalScore += scores[message.classification as CountedClassification];
+    if (message.classification in CLASSIFICATION_ACCURACY_INFO) {
+      totalScore += getClassificationAccuracy(
+        message.classification as CountedClassification
+      );
       classifiedMovesCount++;
     }
   }
@@ -1697,8 +1715,10 @@ function buildReviewComment(
   let hasLeft = false,
     hasRight = false;
   analysis.messages.forEach((msg: Message) => {
-    if (msg.side === "left") hasLeft = true;
-    else if (msg.side === "right") hasRight = true;
+    if (msg.side === "left" && !IMPLIED_MESSAGE_REGEX.test(msg.content))
+      hasLeft = true;
+    else if (msg.side === "right" && !IMPLIED_MESSAGE_REGEX.test(msg.content))
+      hasRight = true;
 
     if (msg.classification in counts) {
       let countedClassification = msg.classification as CountedClassification;
@@ -1783,8 +1803,8 @@ function buildReviewComment(
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is designed for entertainment only, its reviews should not be taken seriously | ",
-          formatting: [[32, 0, 89]],
+          text: "This bot is designed for entertainment, its reviews should not be taken seriously. ",
+          formatting: [[32, 0, 83]],
         })
         .link({
           text: "about",
