@@ -39,7 +39,7 @@ const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_VOTES_FOR_USER_FLAIR = 10;
 
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
-const ELO_VOTE_REGEX = /!elo\s+(-?\d+)\b/i;
+const ELO_VOTE_REGEX = /!elo (-?\d+)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
 const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
 const IMPLIED_MESSAGE_REGEX = /^\*.*\*$/;
@@ -1609,7 +1609,7 @@ async function handleEloVote(
           const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${postId}/`;
           await reddit.sendPrivateMessage({
             subject: `Your user flair on r/${subredditName} has been updated`,
-            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${newElo} Elo. Your user flair has been automatically updated. You can [remove it on the subreddit](https://www.reddit.com/r/TextingTheory/comments/14jo7nq/user_flairs_just_dropped/), or choose to wear it like a badge of honor, even if it's low.`,
+            text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${newElo} Elo. Your user flair has been automatically updated, and will continue to be updated as long as you don't remove it. You can [remove it on the subreddit](https://www.reddit.com/r/TextingTheory/comments/14jo7nq/user_flairs_just_dropped/), or choose to wear it like a badge of honor, even if it's low.`,
             to: postAuthor.username,
           });
 
