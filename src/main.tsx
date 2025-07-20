@@ -71,9 +71,9 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 4321, 321, 666, 14, 88, 1488,
-  109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001, 12345, 123456,
-  31415, 1984, 1945, 1939, 1914,
+  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 234, 2345, 3456, 4321, 321,
+  666, 14, 88, 1488, 109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001,
+  12345, 123456, 31415, 1984, 1945, 1939, 1914, 111, 1111, 222, 2222, 333, 3333,
 ];
 
 const CLASSIFICATION_ACCURACY_INFO: Record<
@@ -101,16 +101,13 @@ const ABOUT_THE_BOT_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/",
   ICON_MEANINGS_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1ksad21/classifications_badges_explained/",
+  WHAT_IS_ELO_LINK =
+    "https://www.reddit.com/r/TextingTheory/comments/1m1o8jl/what_is_elo/",
   MORE_ANNOTATION_INFO_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1lmnlr6/manual_annotations_guide/";
 
 Devvit.configure({
-  http: {
-    domains: [
-      "api.pinecone.io",
-      "texting-theory-mw88dme.svc.aped-4627-b74a.pinecone.io",
-    ],
-  },
+  http: true,
   media: true,
   redditAPI: true,
   redis: true,
@@ -809,17 +806,22 @@ Devvit.addMenuItem({
 
     do {
       const comment = await reddit.getCommentById(nextId);
-      if (comment.authorName !== "AutoModerator") {
+      if (
+        !comment.removed &&
+        comment.authorName !== "TextingTheory-ModTeam" &&
+        comment.authorName !== "AutoModerator"
+      ) {
         const redditComment: RedditComment = {
           username: comment.authorName,
           content: getNormalizedCommentBody(appName, comment),
         };
         commentChain.unshift(redditComment);
+      } else if (!commentChain.length) {
+        ui.showToast("Error: Cannot annotate this comment");
+        return;
       }
       nextId = comment.parentId;
     } while (nextId.startsWith("t1_"));
-
-    if (!commentChain.length) return;
 
     await redis.hSet(`${COMMENT_CHAIN_DATA_PREFIX}${targetId}_${userId}`, {
       commentChain: JSON.stringify(commentChain),
@@ -1309,16 +1311,16 @@ Devvit.addTrigger({
       }
     }
 
-    // try {
-    //   const convoText = getConvoText(analysis.messages);
-    //   const embedding = await getEmbedding(ai, convoText);
+    try {
+      const convoText = getConvoText(analysis.messages);
+      const embedding = await getEmbedding(ai, convoText);
 
-    //   await pineconeIndex.upsert([
-    //     { id: post.id, values: embedding, metadata: { convoText } },
-    //   ]);
-    // } catch (e: any) {
-    //   console.error("Error upserting embedding to Pinecone", e);
-    // }
+      await pineconeIndex.upsert([
+        { id: post.id, values: embedding, metadata: { convoText } },
+      ]);
+    } catch (e: any) {
+      console.error("Error upserting embedding to Pinecone", e);
+    }
 
     const uid = `analysis_${post.id}`;
 
@@ -1396,12 +1398,12 @@ Devvit.addTrigger({
       console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
 
-    // try {
-    //   await pineconeIndex.deleteOne(postId);
-    //   console.log(`[${postId}] Pinecone entry deleted successfully.`);
-    // } catch (e: any) {
-    //   console.error(`[${postId}] Error deleting Pinecone entry:`, e);
-    // }
+    try {
+      await pineconeIndex.deleteOne(postId);
+      console.log(`[${postId}] Pinecone entry deleted successfully.`);
+    } catch (e: any) {
+      console.error(`[${postId}] Error deleting Pinecone entry:`, e);
+    }
   },
 });
 
@@ -1467,7 +1469,11 @@ Devvit.addTrigger({
 // });
 
 function badVoteValue(voteValue: number): boolean {
-  return voteValue >= 4000 || BANNED_VOTE_VALUES.includes(Math.abs(voteValue));
+  return (
+    voteValue < 0 ||
+    voteValue >= 4000 ||
+    BANNED_VOTE_VALUES.includes(Math.abs(voteValue))
+  );
 }
 
 function calculateConsensusElo(votes: number[]): number {
@@ -1803,8 +1809,8 @@ function buildReviewComment(
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is designed for entertainment, its reviews should not be taken seriously. ",
-          formatting: [[32, 0, 83]],
+          text: "This bot is made for entertainment, do not take its reviews seriously. ",
+          formatting: [[32, 0, 71]],
         })
         .link({
           text: "about",
@@ -1819,6 +1825,15 @@ function buildReviewComment(
           text: "icons explained",
           formatting: [[32, 0, 15]],
           url: ICON_MEANINGS_LINK,
+        })
+        .text({
+          text: " | ",
+          formatting: [[32, 0, 3]],
+        })
+        .link({
+          text: "Elo voting",
+          formatting: [[32, 0, 10]],
+          url: WHAT_IS_ELO_LINK,
         })
         .text({
           text: " | ",
