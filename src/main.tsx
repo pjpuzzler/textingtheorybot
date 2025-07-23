@@ -39,7 +39,7 @@ const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_VOTES_FOR_USER_FLAIR = 10;
 
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
-const ELO_VOTE_REGEX = /!elo (-?\d+)\b/i;
+const ELO_VOTE_REGEX = /!elo ([1-9]\d{2}|[1-2]\d{3}|3000)\b/i;
 const ELO_REGEX = /(\d+) Elo/;
 const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
 const IMPLIED_MESSAGE_REGEX = /^\*.*\*$/;
@@ -71,9 +71,9 @@ const RENDER_POLL_DELAY = 5000;
 const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  69, 6969, 696969, 420, 42069, 69420, 1234, 123, 234, 2345, 3456, 4321, 321,
-  666, 14, 88, 1488, 109, 1738, 911, 2001, 1337, 8008, 80085, 58008, 9000, 9001,
-  12345, 123456, 31415, 1984, 1945, 1939, 1914, 111, 1111, 222, 2222, 333, 3333,
+  420, 1234, 123, 234, 2345, 321, 1488, 109, 1738, 911, 2001, 1337, 1984, 1945,
+  1939, 1914, 111, 1111, 222, 2222, 333, 444, 555, 666, 777, 888, 999, 1776,
+  2025,
 ];
 
 const CLASSIFICATION_ACCURACY_INFO: Record<
@@ -95,7 +95,7 @@ const CLASSIFICATION_ACCURACY_INFO: Record<
 };
 
 const GITHUB_DISPATCH_URL =
-  "https://api.github.com/repos/pjpuzzler/textingtheory-renderer/actions/workflows/render-and-upload.yml/dispatches";
+  "https://api.github.com/repos/pjpuzzler/textingtheory-renderer/dispatches";
 
 const ABOUT_THE_BOT_LINK =
     "https://www.reddit.com/r/TextingTheory/comments/1k8fed9/utextingtheorybot/",
@@ -563,8 +563,11 @@ async function dispatchGitHubAction(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      ref: "main",
-      inputs: { uid, render_payload: JSON.stringify(renderData), command },
+      event_type: command,
+      client_payload: {
+        uid,
+        render_payload: renderData,
+      },
     }),
   });
 
@@ -1469,11 +1472,7 @@ Devvit.addTrigger({
 // });
 
 function badVoteValue(voteValue: number): boolean {
-  return (
-    voteValue < 0 ||
-    voteValue >= 4000 ||
-    BANNED_VOTE_VALUES.includes(Math.abs(voteValue))
-  );
+  return BANNED_VOTE_VALUES.includes(voteValue);
 }
 
 function calculateConsensusElo(votes: number[]): number {
