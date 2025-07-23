@@ -26,6 +26,16 @@ export type CountedClassification =
   | Classification.BRILLIANT
   | Classification.GREAT
   | Classification.BEST
+  | Classification.MISTAKE
+  | Classification.MISS
+  | Classification.BLUNDER
+  | Classification.MEGABLUNDER;
+
+export type AccuracyClassification =
+  | Classification.SUPERBRILLIANT
+  | Classification.BRILLIANT
+  | Classification.GREAT
+  | Classification.BEST
   | Classification.EXCELLENT
   | Classification.GOOD
   | Classification.BOOK
@@ -66,7 +76,7 @@ export type ColorBlock = {
 
 export type Analysis = {
   messages: Message[];
-  elo?: EloBlock;
+  elo: EloBlock;
   color: ColorBlock;
   opening_name: string;
   comment: string;

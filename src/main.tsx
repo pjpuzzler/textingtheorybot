@@ -23,6 +23,7 @@ import {
   SYSTEM_PROMPT,
 } from "./systemPrompt.js";
 import {
+  AccuracyClassification,
   Analysis,
   Classification,
   CountedClassification,
@@ -79,7 +80,7 @@ const BANNED_VOTE_VALUES = [
 ];
 
 const CLASSIFICATION_ACCURACY_INFO: Record<
-  CountedClassification,
+  AccuracyClassification,
   { accuracy: number; radius: number }
 > = {
   [Classification.SUPERBRILLIANT]: { accuracy: 100, radius: 0 },
@@ -181,7 +182,6 @@ function getGeminiConfig() {
       elo: {
         type: Type.OBJECT,
         description: "Estimated Elo ratings for the players.",
-        nullable: true,
         properties: {
           left: {
             type: Type.INTEGER,
@@ -266,7 +266,7 @@ function getGeminiConfig() {
         nullable: true,
       },
     },
-    required: ["messages", "color", "opening_name", "comment"],
+    required: ["messages", "elo", "color", "opening_name", "comment"],
   };
 
   return {
@@ -909,11 +909,7 @@ Devvit.addMenuItem({
     if (shouldVote) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
-      if (
-        !analysis.elo ||
-        !analysis.vote_target ||
-        !analysis.elo[analysis.vote_target]
-      )
+      if (!analysis.vote_target || !analysis.elo[analysis.vote_target])
         console.log(`[${post.id}] No valid Elo found... skipping`);
       else {
         try {
@@ -1294,11 +1290,7 @@ Devvit.addTrigger({
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
 
-      if (
-        !analysis.elo ||
-        !analysis.vote_target ||
-        !analysis.elo[analysis.vote_target]
-      )
+      if (!analysis.vote_target || !analysis.elo[analysis.vote_target])
         console.log(`[${post.id}] No valid Elo found... skipping`);
       else {
         try {
@@ -1710,10 +1702,6 @@ function buildReviewComment(
       [Classification.BRILLIANT]: { left: 0, right: 0 },
       [Classification.GREAT]: { left: 0, right: 0 },
       [Classification.BEST]: { left: 0, right: 0 },
-      [Classification.EXCELLENT]: { left: 0, right: 0 },
-      [Classification.GOOD]: { left: 0, right: 0 },
-      [Classification.BOOK]: { left: 0, right: 0 },
-      [Classification.INACCURACY]: { left: 0, right: 0 },
       [Classification.MISTAKE]: { left: 0, right: 0 },
       [Classification.MISS]: { left: 0, right: 0 },
       [Classification.BLUNDER]: { left: 0, right: 0 },
@@ -1727,11 +1715,8 @@ function buildReviewComment(
     else if (msg.side === "right" && !IMPLIED_MESSAGE_REGEX.test(msg.content))
       hasRight = true;
 
-    if (msg.classification in counts) {
-      let countedClassification = msg.classification as CountedClassification;
-      if (msg.side === "left") counts[countedClassification].left++;
-      else if (msg.side === "right") counts[countedClassification].right++;
-    }
+    if (msg.classification in counts)
+      counts[msg.classification as CountedClassification][msg.side]++;
   });
 
   return new RichTextBuilder()
@@ -1750,36 +1735,32 @@ function buildReviewComment(
       })
     )
     .table((table) => {
+      table.headerCell({}, () => {});
       if (hasLeft)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
-            text:
-              analysis.color.left!.label +
-              (analysis.elo?.left ? ` (${analysis.elo.left})` : ""),
+            text: analysis.color.left!.label,
           })
         );
-      table.headerCell({ columnAlignment: "center" }, () => {});
       if (hasRight)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
-            text:
-              analysis.color.right!.label +
-              (analysis.elo?.right ? ` (${analysis.elo.right})` : ""),
+            text: analysis.color.right!.label,
           })
         );
 
       table.row((row) => {
+        row.cell((cell) => cell.text({ text: "Accuracy" }));
         if (hasLeft)
           row.cell((cell) =>
             cell.text({
-              text: getAccuracyString(analysis.messages, "left"),
+              text: `\`${getAccuracyString(analysis.messages, "left")}\``,
             })
           );
-        row.cell((cell) => cell.text({ text: "Accuracy" }));
         if (hasRight)
           row.cell((cell) =>
             cell.text({
-              text: getAccuracyString(analysis.messages, "right"),
+              text: `\`${getAccuracyString(analysis.messages, "right")}\``,
             })
           );
       });
@@ -1798,20 +1779,43 @@ function buildReviewComment(
           value.right == 0
         )
           return;
+
         table.row((row) => {
+          row.cell((cell) => cell.text({ text: key }));
           if (hasLeft)
             row.cell((cell) => cell.text({ text: value.left.toString() }));
-          row.cell((cell) => cell.text({ text: key }));
           if (hasRight)
             row.cell((cell) => cell.text({ text: value.right.toString() }));
         });
+      });
+
+      table.row((row) => {
+        if (hasLeft) row.cell(() => {});
+        row.cell(() => {});
+        if (hasRight) row.cell(() => {});
+      });
+
+      table.row((row) => {
+        row.cell((cell) => cell.text({ text: "Game Rating" }));
+        if (hasLeft)
+          row.cell((cell) =>
+            cell.text({
+              text: `\`${analysis.elo.left!}\``,
+            })
+          );
+        if (hasRight)
+          row.cell((cell) =>
+            cell.text({
+              text: `\`${analysis.elo.right!}\``,
+            })
+          );
       });
     })
     .paragraph((p) =>
       p
         .text({
-          text: "This bot is made for entertainment, do not take its reviews seriously. ",
-          formatting: [[32, 0, 71]],
+          text: "This bot is for entertainment purposes only. ",
+          formatting: [[32, 0, 45]],
         })
         .link({
           text: "about",
@@ -1841,8 +1845,8 @@ function buildReviewComment(
           formatting: [[32, 0, 3]],
         })
         .link({
-          text: "make your own",
-          formatting: [[32, 0, 13]],
+          text: "manual annotation",
+          formatting: [[32, 0, 17]],
           url: MORE_ANNOTATION_INFO_LINK,
         })
     );
