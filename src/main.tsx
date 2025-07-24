@@ -73,10 +73,10 @@ const MAX_RENDER_POLL_ATTEMPTS = 3;
 
 const BANNED_VOTE_VALUES = [
   420, 1234, 123, 234, 2345, 321, 1488, 109, 1738, 911, 2001, 1337, 1984, 1945,
-  1939, 1914, 111, 1111, 222, 2222, 333, 444, 555, 666, 777, 888, 999, 1776,
-  2025, 169, 269, 369, 469, 569, 669, 769, 869, 969, 1069, 1169, 1269, 1369,
-  1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369, 2469, 2569, 2669,
-  2769, 2869, 2969,
+  1939, 1914, 111, 101, 1111, 222, 2222, 333, 444, 555, 666, 777, 888, 999,
+  1776, 2025, 169, 269, 369, 469, 569, 669, 769, 869, 969, 1069, 1169, 1269,
+  1369, 1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369, 2469, 2569,
+  2669, 2769, 2869, 2969, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699,
 ];
 
 const CLASSIFICATION_ACCURACY_INFO: Record<
@@ -95,6 +95,17 @@ const CLASSIFICATION_ACCURACY_INFO: Record<
   [Classification.MISS]: { accuracy: -10, radius: 3 },
   [Classification.BLUNDER]: { accuracy: -60, radius: 40 },
   [Classification.MEGABLUNDER]: { accuracy: -100, radius: 0 },
+};
+
+const CLASSIFICATION_UNICODES: Record<CountedClassification, string> = {
+  [Classification.SUPERBRILLIANT]: "!!!",
+  [Classification.BRILLIANT]: "!!",
+  [Classification.GREAT]: "!",
+  [Classification.BEST]: "★",
+  [Classification.MISTAKE]: "?",
+  [Classification.MISS]: "X",
+  [Classification.BLUNDER]: "??",
+  [Classification.MEGABLUNDER]: "???",
 };
 
 const GITHUB_DISPATCH_URL =
@@ -1735,7 +1746,7 @@ function buildReviewComment(
       })
     )
     .table((table) => {
-      table.headerCell({}, () => {});
+      table.headerCell({ columnAlignment: "left" }, () => {});
       if (hasLeft)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
@@ -1766,8 +1777,8 @@ function buildReviewComment(
       });
 
       table.row((row) => {
-        if (hasLeft) row.cell(() => {});
         row.cell(() => {});
+        if (hasLeft) row.cell(() => {});
         if (hasRight) row.cell(() => {});
       });
 
@@ -1780,8 +1791,16 @@ function buildReviewComment(
         )
           return;
 
+        const classificationUnicode =
+          CLASSIFICATION_UNICODES[key as CountedClassification];
+
         table.row((row) => {
-          row.cell((cell) => cell.text({ text: key }));
+          row.cell((cell) =>
+            cell.text({
+              text: `${key} (${classificationUnicode})`,
+              formatting: [[1, key.length + 2, classificationUnicode.length]],
+            })
+          );
           if (hasLeft)
             row.cell((cell) => cell.text({ text: value.left.toString() }));
           if (hasRight)
@@ -1790,8 +1809,8 @@ function buildReviewComment(
       });
 
       table.row((row) => {
-        if (hasLeft) row.cell(() => {});
         row.cell(() => {});
+        if (hasLeft) row.cell(() => {});
         if (hasRight) row.cell(() => {});
       });
 
