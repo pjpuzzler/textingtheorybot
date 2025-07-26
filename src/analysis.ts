@@ -82,3 +82,9 @@ export type Analysis = {
   comment: string;
   vote_target?: "left" | "right";
 };
+
+export type PineconeMatch = {
+  id: string;
+  score: number;
+  title?: string;
+};

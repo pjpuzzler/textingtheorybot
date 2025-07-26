@@ -16,7 +16,12 @@ import {
   HarmBlockThreshold,
   Type,
 } from "@google/genai";
-import { Pinecone } from "@pinecone-database/pinecone";
+import {
+  Index,
+  Pinecone,
+  RecordMetadata,
+  ScoredPineconeRecord,
+} from "@pinecone-database/pinecone";
 import {
   MEGABLUNDER_TEXT,
   SUPERBRILLIANT_TEXT,
@@ -28,6 +33,7 @@ import {
   Classification,
   CountedClassification,
   Message,
+  PineconeMatch,
   RedditComment,
 } from "./analysis.js";
 import { getEloColor } from "./color.js";
@@ -78,6 +84,9 @@ const BANNED_VOTE_VALUES = [
   1369, 1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369, 2469, 2569,
   2669, 2769, 2869, 2969, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699,
 ];
+
+const MAX_SIMILAR_CONVERSATIONS = 3;
+const MIN_CONVERSATION_SIMILARITY_SCORE = 0.9;
 
 const CLASSIFICATION_ACCURACY_INFO: Record<
   AccuracyClassification,
@@ -422,6 +431,22 @@ async function getEmbedding(
     },
   });
   return res.embeddings![0].values!;
+}
+
+async function findSimilarConversations(
+  pineconeIndex: Index<RecordMetadata>,
+  embedding: number[]
+): Promise<PineconeMatch[]> {
+  const queryResult = await pineconeIndex.query({
+    vector: embedding,
+    topK: MAX_SIMILAR_CONVERSATIONS,
+  });
+
+  return queryResult.matches
+    .filter(
+      (match) => match.score && match.score >= MIN_CONVERSATION_SIMILARITY_SCORE
+    )
+    .map((match) => ({ id: match.id, score: match.score! }));
 }
 
 async function getGeminiAnalysis(
@@ -950,6 +975,7 @@ Devvit.addMenuItem({
         name: "comment_analysis",
         data: {
           analysis: analysis!,
+          similarConversations: [],
           originalId: post.id,
           uid,
           type: "analysis",
@@ -987,6 +1013,7 @@ Devvit.addSchedulerJob({
     const {
       analysis,
       attempt,
+      similarConversations,
       originalId,
       uid,
       type,
@@ -1025,6 +1052,7 @@ Devvit.addSchedulerJob({
         name: "comment_analysis",
         data: {
           analysis,
+          similarConversations,
           attempt: curAttempt + 1,
           originalId,
           uid,
@@ -1063,6 +1091,15 @@ Devvit.addSchedulerJob({
         }
 
         const reviewAnalysis = analysis as Analysis;
+        const reviewSimilarConversations =
+          similarConversations as PineconeMatch[];
+
+        for (const similarConversation of reviewSimilarConversations) {
+          const similarConversationPost = await reddit.getPostById(
+            similarConversation.id
+          );
+          similarConversation.title = similarConversationPost.title;
+        }
 
         if (
           TITLE_ME_VOTE_REGEX.test(post.title) &&
@@ -1075,7 +1112,8 @@ Devvit.addSchedulerJob({
 
         const richTextComment = buildReviewComment(
           reviewAnalysis,
-          uploadResponse.mediaId
+          uploadResponse.mediaId,
+          reviewSimilarConversations
         );
 
         const comment = await reddit.submitComment({
@@ -1319,15 +1357,22 @@ Devvit.addTrigger({
       }
     }
 
+    let similarConversations: PineconeMatch[] = [];
+
     try {
       const convoText = getConvoText(analysis.messages);
       const embedding = await getEmbedding(ai, convoText);
+
+      similarConversations = await findSimilarConversations(
+        pineconeIndex,
+        embedding
+      );
 
       await pineconeIndex.upsert([
         { id: post.id, values: embedding, metadata: { convoText } },
       ]);
     } catch (e: any) {
-      console.error("Error upserting embedding to Pinecone", e);
+      console.error("Error with embedding/Pinecone", e);
     }
 
     const uid = `analysis_${post.id}`;
@@ -1340,6 +1385,7 @@ Devvit.addTrigger({
         name: "comment_analysis",
         data: {
           analysis,
+          similarConversations,
           originalId: post.id,
           uid,
           type: "analysis",
@@ -1705,7 +1751,8 @@ function getAccuracyString(
 
 function buildReviewComment(
   analysis: Analysis,
-  mediaId: string
+  mediaId: string,
+  similarConversations: PineconeMatch[]
 ): RichTextBuilder {
   const counts: Record<CountedClassification, { left: number; right: number }> =
     {
@@ -1730,7 +1777,7 @@ function buildReviewComment(
       counts[msg.classification as CountedClassification][msg.side]++;
   });
 
-  return new RichTextBuilder()
+  let builder = new RichTextBuilder()
     .paragraph((p) =>
       p.text({
         text: "✪ Game Review",
@@ -1750,13 +1797,17 @@ function buildReviewComment(
       if (hasLeft)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
-            text: analysis.color.left!.label,
+            text:
+              analysis.color.left!.label +
+              (analysis.vote_target === "left" ? " [Vote]" : ""),
           })
         );
       if (hasRight)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
           cell.text({
-            text: analysis.color.right!.label,
+            text:
+              analysis.color.right!.label +
+              (analysis.vote_target === "right" ? " [Vote]" : ""),
           })
         );
 
@@ -1829,47 +1880,140 @@ function buildReviewComment(
             })
           );
       });
-    })
-    .paragraph((p) =>
-      p
-        .text({
-          text: "This bot is for entertainment purposes only. ",
-          formatting: [[32, 0, 45]],
-        })
-        .link({
-          text: "about",
-          formatting: [[32, 0, 5]],
-          url: ABOUT_THE_BOT_LINK,
-        })
-        .text({
-          text: " | ",
-          formatting: [[32, 0, 3]],
-        })
-        .link({
-          text: "icons explained",
-          formatting: [[32, 0, 15]],
-          url: ICON_MEANINGS_LINK,
-        })
-        .text({
-          text: " | ",
-          formatting: [[32, 0, 3]],
-        })
-        .link({
-          text: "Elo voting",
-          formatting: [[32, 0, 10]],
-          url: WHAT_IS_ELO_LINK,
-        })
-        .text({
-          text: " | ",
-          formatting: [[32, 0, 3]],
-        })
-        .link({
-          text: "manual annotation",
-          formatting: [[32, 0, 17]],
-          url: MORE_ANNOTATION_INFO_LINK,
-        })
-    );
+    });
+
+  if (similarConversations.length) {
+    builder = builder
+      .paragraph((paragraph) => paragraph.text({ text: "Similar Games:" }))
+      .list({ ordered: true }, (list) => {
+        similarConversations.forEach((match) =>
+          list.item((item) =>
+            item.paragraph((paragraph) =>
+              paragraph
+                .postLink({
+                  permalink: `/r/TextingTheory/comments/${match.id}`,
+                })
+                .text({ text: ` (${(match.score * 100).toFixed(1)}%)` })
+            )
+          )
+        );
+      });
+  }
+
+  builder = builder.paragraph((p) =>
+    p
+      .text({
+        text: "This bot is for entertainment purposes only. ",
+        formatting: [[32, 0, 45]],
+      })
+      .link({
+        text: "about",
+        formatting: [[32, 0, 5]],
+        url: ABOUT_THE_BOT_LINK,
+      })
+      .text({
+        text: " | ",
+        formatting: [[32, 0, 3]],
+      })
+      .link({
+        text: "icons explained",
+        formatting: [[32, 0, 15]],
+        url: ICON_MEANINGS_LINK,
+      })
+      .text({
+        text: " | ",
+        formatting: [[32, 0, 3]],
+      })
+      .link({
+        text: "Elo voting",
+        formatting: [[32, 0, 10]],
+        url: WHAT_IS_ELO_LINK,
+      })
+      .text({
+        text: " | ",
+        formatting: [[32, 0, 3]],
+      })
+      .link({
+        text: "manual annotation",
+        formatting: [[32, 0, 17]],
+        url: MORE_ANNOTATION_INFO_LINK,
+      })
+  );
+
+  return builder;
 }
+
+Devvit.addMenuItem({
+  label: "Test Status Update",
+  location: "subreddit",
+  forUserType: "moderator",
+  onPress: async (event, context) => {
+    const { ui, subredditId } = context;
+
+    // The GraphQL endpoint URL.
+    const GRAPHQL_URL = "https://www.reddit.com/svc/shreddit/graphql";
+
+    // Define the rich text content for the status widget.
+    const richTextPayload = {
+      document: [
+        {
+          e: "par",
+          c: [{ e: "text", t: "Megablunder Test", f: [[1, 0, 15]] }], // Bold text
+        },
+        {
+          e: "par",
+          c: [
+            { e: "u/", t: "textingtheorybot", l: false },
+            { e: "text", t: " status is in test mode.", f: [] },
+          ],
+        },
+      ],
+    };
+
+    // Construct the full GraphQL payload.
+    const fullPayload = {
+      operation: "UpdateCommunityStatus",
+      variables: {
+        input: {
+          subredditId: subredditId,
+          emojiId: "megablunder", // The name of your custom emoji
+          description: { richText: JSON.stringify(richTextPayload) },
+        },
+      },
+    };
+
+    try {
+      console.log(
+        "Sending payload to set subreddit status:",
+        JSON.stringify(fullPayload, null, 2)
+      );
+
+      // Use the global `fetch` function. Devvit handles authentication for reddit.com URLs.
+      const response = await fetch(GRAPHQL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fullPayload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `API call failed with status ${response.status}: ${errorText}`
+        );
+      }
+
+      const responseData = await response.json();
+      console.log("Successfully updated subreddit status:", responseData);
+
+      ui.showToast({
+        text: "Successfully set the subreddit status!",
+        appearance: "success",
+      });
+    } catch (error) {
+      console.error("Failed to set subreddit status:", error);
+    }
+  },
+});
 
 function buildAnnotateComment(
   requestingUsername: string,
