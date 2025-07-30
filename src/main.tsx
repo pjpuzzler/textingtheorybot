@@ -16,12 +16,7 @@ import {
   HarmBlockThreshold,
   Type,
 } from "@google/genai";
-import {
-  Index,
-  Pinecone,
-  RecordMetadata,
-  ScoredPineconeRecord,
-} from "@pinecone-database/pinecone";
+import { Index, Pinecone, RecordMetadata } from "@pinecone-database/pinecone";
 import {
   MEGABLUNDER_TEXT,
   SUPERBRILLIANT_TEXT,
@@ -83,6 +78,7 @@ const BANNED_VOTE_VALUES = [
   1776, 2025, 169, 269, 369, 469, 569, 669, 769, 869, 969, 1069, 1169, 1269,
   1369, 1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369, 2469, 2569,
   2669, 2769, 2869, 2969, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699,
+  1666, 2666, 1420, 2420, 1123, 2123, 1321, 1911, 1691,
 ];
 
 const MAX_SIMILAR_CONVERSATIONS = 3;
@@ -167,7 +163,6 @@ function getGeminiConfig() {
     weekday: "long",
   });
   const validClassifications = Object.values(Classification).filter((c) => {
-    if (c === Classification.INTERESTING) return false;
     if (c === Classification.MEGABLUNDER) return dayOfWeek === "Monday";
     if (c === Classification.SUPERBRILLIANT) return dayOfWeek === "Saturday";
     return true;
@@ -525,9 +520,10 @@ async function getGeminiAnalysis(
       temperature: 0,
       responseMimeType: "application/json",
       thinkingConfig: {
-        thinkingBudget: 1024,
+        // thinkingBudget: 1024,
         // thinkingBudget: 24576,
-        // thinkingBudget: -1,
+        thinkingBudget: -1,
+        // thinkingBudget: 128,
       },
       safetySettings: [
         {
@@ -1907,8 +1903,8 @@ function buildReviewComment(
         formatting: [[32, 0, 45]],
       })
       .link({
-        text: "about",
-        formatting: [[32, 0, 5]],
+        text: "about the bot",
+        formatting: [[32, 0, 13]],
         url: ABOUT_THE_BOT_LINK,
       })
       .text({
@@ -1916,8 +1912,8 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "icons explained",
-        formatting: [[32, 0, 15]],
+        text: "symbols meaning?",
+        formatting: [[32, 0, 16]],
         url: ICON_MEANINGS_LINK,
       })
       .text({
@@ -1925,8 +1921,8 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "Elo voting",
-        formatting: [[32, 0, 10]],
+        text: "what is Elo?",
+        formatting: [[32, 0, 13]],
         url: WHAT_IS_ELO_LINK,
       })
       .text({
@@ -1934,8 +1930,8 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "manual annotation",
-        formatting: [[32, 0, 17]],
+        text: "Annotate menu",
+        formatting: [[32, 0, 13]],
         url: MORE_ANNOTATION_INFO_LINK,
       })
   );
