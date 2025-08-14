@@ -988,6 +988,34 @@ Devvit.addMenuItem({
 });
 
 Devvit.addMenuItem({
+  label: "Force Info Comment",
+  location: "post",
+  forUserType: "moderator",
+  onPress: async (event, context) => {
+    const { targetId } = event;
+    const { reddit, ui } = context;
+
+    const post = await reddit.getPostById(targetId);
+
+    if (post.flair?.templateId === ANNOTATED_FLAIR_ID) {
+      const comment = await reddit.submitComment({
+        id: post.id,
+        richtext: buildAnnotatedInfoComment(),
+      });
+      await comment.distinguish(true);
+    } else if (post.flair?.templateId === OPENING_FLAIR_ID) {
+      const comment = await reddit.submitComment({
+        id: post.id,
+        richtext: buildOpeningInfoComment(),
+      });
+      await comment.distinguish(true);
+    }
+
+    ui.showToast("Commented successfully");
+  },
+});
+
+Devvit.addMenuItem({
   label: "Delete Saved Analysis",
   location: "post",
   forUserType: "moderator",
@@ -1247,8 +1275,23 @@ Devvit.addTrigger({
     if (
       post.linkFlair &&
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
-    )
+    ) {
+      if (post.linkFlair.templateId === ANNOTATED_FLAIR_ID) {
+        const comment = await reddit.submitComment({
+          id: post.id,
+          richtext: buildAnnotatedInfoComment(),
+        });
+        await comment.distinguish(true);
+      } else if (post.linkFlair.templateId === OPENING_FLAIR_ID) {
+        const comment = await reddit.submitComment({
+          id: post.id,
+          richtext: buildOpeningInfoComment(),
+        });
+        await comment.distinguish(true);
+      }
+
       return;
+    }
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
     const isVotePost = true;
@@ -1907,8 +1950,8 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "what is Elo?",
-        formatting: [[32, 0, 13]],
+        text: "!elo",
+        formatting: [[32, 0, 4]],
         url: WHAT_IS_ELO_LINK,
       })
       .text({
@@ -1937,6 +1980,48 @@ function buildAnnotateComment(
         text: "make your own",
         formatting: [[32, 0, 13]],
         url: MORE_ANNOTATION_INFO_LINK,
+      })
+    );
+}
+
+function buildAnnotatedInfoComment(): RichTextBuilder {
+  return new RichTextBuilder()
+    .paragraph((p) =>
+      p.text({
+        text: "Note: This post is Annotated",
+        formatting: [
+          [1, 0, 4],
+          [1, 19, 9],
+        ],
+      })
+    )
+    .paragraph((p) =>
+      p.text({
+        text: "`!elo` votes will have no effect",
+      })
+    );
+}
+
+function buildOpeningInfoComment(): RichTextBuilder {
+  return new RichTextBuilder()
+    .paragraph((p) =>
+      p.text({
+        text: "Note: This post showcases an Opening",
+        formatting: [
+          [1, 0, 4],
+          [1, 29, 7],
+        ],
+      })
+    )
+    .paragraph((p) =>
+      p.text({
+        text: "!elo votes will have no effect",
+      })
+    )
+    .paragraph((p) =>
+      p.text({
+        text: "Coming soon: voting on the opening's classification",
+        formatting: [[2, 0, 51]],
       })
     );
 }
