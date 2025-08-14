@@ -46,14 +46,17 @@ const ELO_REGEX = /(\d+) Elo/;
 const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
 const IMPLIED_MESSAGE_REGEX = /^\*.*\*$/;
 
-const REQUESTING_ANNOTATION_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
-  ALREADY_ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
-  MEGABLUNDER_MONDAY_FLAIR_ID = "a41e2978-4c76-11f0-a7d9-8a051a625ee6",
-  SUPERBRILLIANT_SATURDAY_FLAIR_ID = "b4df51ec-4c76-11f0-8011-568335338cf7",
+const UNANNOTATED_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
+  ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
+  OPENING_FLAIR_ID = "698fdce2-792c-11f0-9870-eedc0e9ecb59",
   META_FLAIR_ID = "edde53c6-7cb1-11ee-8104-3e49ebced071",
   ANNOUNCEMENT_FLAIR_ID = "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf";
 
-const NO_ANALYSIS_FLAIR_IDS = [META_FLAIR_ID, ANNOUNCEMENT_FLAIR_ID];
+const NO_ANALYSIS_FLAIR_IDS = [
+  OPENING_FLAIR_ID,
+  META_FLAIR_ID,
+  ANNOUNCEMENT_FLAIR_ID,
+];
 
 const CUSTOM_1_FLAIR_ID = "22828506-cad6-11eb-ba90-0e07bb4c3bf9";
 const CUSTOM_2_FLAIR_ID = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
@@ -70,15 +73,15 @@ const ANALYSIS_COUNT_KEY = "analysis_count";
 
 const RENDER_INITIAL_DELAY = 15000;
 const RENDER_POLL_DELAY = 5000;
-const MAX_RENDER_POLL_ATTEMPTS = 3;
+const MAX_RENDER_POLL_ATTEMPTS = 5;
 
 const BANNED_VOTE_VALUES = [
-  420, 1234, 123, 234, 2345, 321, 1488, 109, 1738, 911, 2001, 1871, 1337, 1984,
-  1945, 1939, 1914, 111, 101, 1111, 222, 2222, 333, 444, 555, 666, 777, 888,
-  999, 1776, 2025, 169, 269, 369, 469, 569, 669, 769, 869, 969, 1069, 1169,
-  1269, 1369, 1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369, 2469,
-  2569, 2669, 2769, 2869, 2969, 690, 691, 692, 693, 694, 695, 696, 697, 698,
-  699, 1666, 2666, 1420, 2420, 1123, 2123, 1321, 1911, 1691,
+  420, 419, 421, 1234, 123, 234, 2345, 321, 1488, 109, 1738, 911, 2001, 1871,
+  1337, 1984, 1945, 1939, 1914, 111, 101, 1111, 222, 2222, 333, 444, 555, 666,
+  777, 888, 999, 1776, 2025, 169, 269, 369, 469, 569, 669, 769, 869, 969, 1069,
+  1169, 1269, 1369, 1469, 1569, 1669, 1769, 1869, 1969, 2069, 2169, 2269, 2369,
+  2469, 2569, 2669, 2769, 2869, 2969, 690, 691, 692, 693, 694, 695, 696, 697,
+  698, 699, 1666, 2666, 1420, 2420, 1123, 2123, 1321, 1911, 1691,
 ];
 
 const MAX_SIMILAR_CONVERSATIONS = 3;
@@ -696,7 +699,7 @@ const annotateAnalysisForm = Devvit.createForm(
       });
 
       ui.showToast({
-        text: `Submitted successfully, please check back in ~${Math.floor(
+        text: `Submitted successfully, please wait ~${Math.floor(
           (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
         )}s`,
         appearance: "success",
@@ -800,7 +803,7 @@ const annotateRedditChainForm = Devvit.createForm(
       });
 
       ui.showToast({
-        text: `Submitted successfully, please check back in ~${Math.floor(
+        text: `Submitted successfully, please wait ~${Math.floor(
           (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
         )}s`,
         appearance: "success",
@@ -936,7 +939,7 @@ Devvit.addMenuItem({
       shouldVote = true;
     }
 
-    if (post.flair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
+    if (post.flair?.templateId === ANNOTATED_FLAIR_ID) return;
 
     if (shouldVote) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
@@ -1241,11 +1244,6 @@ Devvit.addTrigger({
 
     const pineconeIndex = pc.Index("texting-theory");
 
-    const dayOfWeek = new Date().toLocaleString("en-US", {
-      timeZone: "America/New_York",
-      weekday: "long",
-    });
-
     if (
       post.linkFlair &&
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
@@ -1267,18 +1265,6 @@ Devvit.addTrigger({
     console.log(
       `[${post.id}] Acquired lock via 'elo_votes' and initialized with empty votes.`
     );
-
-    if (
-      (post.linkFlair?.templateId === MEGABLUNDER_MONDAY_FLAIR_ID &&
-        dayOfWeek !== "Monday") ||
-      (post.linkFlair?.templateId === SUPERBRILLIANT_SATURDAY_FLAIR_ID &&
-        dayOfWeek !== "Saturday")
-    )
-      await reddit.setPostFlair({
-        subredditName: subredditName!,
-        postId: post.id,
-        flairTemplateId: REQUESTING_ANNOTATION_FLAIR_ID,
-      });
 
     const imageUrls: string[] = [];
 
@@ -1330,7 +1316,7 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
-    if (post.linkFlair?.templateId === ALREADY_ANNOTATED_FLAIR_ID) return;
+    if (post.linkFlair?.templateId === ANNOTATED_FLAIR_ID) return;
 
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
@@ -1683,7 +1669,7 @@ async function handleUserEloVote(
   if (
     post.linkFlair &&
     (NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId) ||
-      post.linkFlair.templateId === ALREADY_ANNOTATED_FLAIR_ID)
+      post.linkFlair.templateId === ANNOTATED_FLAIR_ID)
   )
     return;
 
@@ -1903,8 +1889,8 @@ function buildReviewComment(
         formatting: [[32, 0, 45]],
       })
       .link({
-        text: "about the bot",
-        formatting: [[32, 0, 13]],
+        text: "about",
+        formatting: [[32, 0, 5]],
         url: ABOUT_THE_BOT_LINK,
       })
       .text({
@@ -1912,8 +1898,8 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "symbols meaning?",
-        formatting: [[32, 0, 16]],
+        text: "symbols",
+        formatting: [[32, 0, 7]],
         url: ICON_MEANINGS_LINK,
       })
       .text({
@@ -1930,86 +1916,14 @@ function buildReviewComment(
         formatting: [[32, 0, 3]],
       })
       .link({
-        text: "Annotate menu",
-        formatting: [[32, 0, 13]],
+        text: "Annotate",
+        formatting: [[32, 0, 8]],
         url: MORE_ANNOTATION_INFO_LINK,
       })
   );
 
   return builder;
 }
-
-Devvit.addMenuItem({
-  label: "Test Status Update",
-  location: "subreddit",
-  forUserType: "moderator",
-  onPress: async (event, context) => {
-    const { ui, subredditId } = context;
-
-    // The GraphQL endpoint URL.
-    const GRAPHQL_URL = "https://www.reddit.com/svc/shreddit/graphql";
-
-    // Define the rich text content for the status widget.
-    const richTextPayload = {
-      document: [
-        {
-          e: "par",
-          c: [{ e: "text", t: "Megablunder Test", f: [[1, 0, 15]] }], // Bold text
-        },
-        {
-          e: "par",
-          c: [
-            { e: "u/", t: "textingtheorybot", l: false },
-            { e: "text", t: " status is in test mode.", f: [] },
-          ],
-        },
-      ],
-    };
-
-    // Construct the full GraphQL payload.
-    const fullPayload = {
-      operation: "UpdateCommunityStatus",
-      variables: {
-        input: {
-          subredditId: subredditId,
-          emojiId: "megablunder", // The name of your custom emoji
-          description: { richText: JSON.stringify(richTextPayload) },
-        },
-      },
-    };
-
-    try {
-      console.log(
-        "Sending payload to set subreddit status:",
-        JSON.stringify(fullPayload, null, 2)
-      );
-
-      // Use the global `fetch` function. Devvit handles authentication for reddit.com URLs.
-      const response = await fetch(GRAPHQL_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fullPayload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `API call failed with status ${response.status}: ${errorText}`
-        );
-      }
-
-      const responseData = await response.json();
-      console.log("Successfully updated subreddit status:", responseData);
-
-      ui.showToast({
-        text: "Successfully set the subreddit status!",
-        appearance: "success",
-      });
-    } catch (error) {
-      console.error("Failed to set subreddit status:", error);
-    }
-  },
-});
 
 function buildAnnotateComment(
   requestingUsername: string,
