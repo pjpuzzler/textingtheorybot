@@ -46,22 +46,17 @@ const ELO_REGEX = /(\d+) Elo/;
 const ANNOTATION_REGEX = /Annotated by (u\/[A-Za-z0-9_-]+)/;
 const IMPLIED_MESSAGE_REGEX = /^\*.*\*$/;
 
-const UNANNOTATED_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
-  ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
-  OPENING_FLAIR_ID = "698fdce2-792c-11f0-9870-eedc0e9ecb59",
+const NO_CHESS_SYMBOLS_FLAIR_ID = "a79dfdbc-4b09-11f0-a6f6-e2bae3f86d0a",
+  HAS_CHESS_SYMBOLS_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d",
   META_FLAIR_ID = "edde53c6-7cb1-11ee-8104-3e49ebced071",
   ANNOUNCEMENT_FLAIR_ID = "dd6d2d40-ca1c-11eb-8d7e-0ec8e8045baf";
 
-const NO_ANALYSIS_FLAIR_IDS = [
-  OPENING_FLAIR_ID,
-  META_FLAIR_ID,
-  ANNOUNCEMENT_FLAIR_ID,
-];
+const NO_ANALYSIS_FLAIR_IDS = [META_FLAIR_ID, ANNOUNCEMENT_FLAIR_ID];
 
-const CUSTOM_1_FLAIR_ID = "22828506-cad6-11eb-ba90-0e07bb4c3bf9";
-const CUSTOM_2_FLAIR_ID = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
+const USER_CUSTOM_FLAIR_ID_1 = "e6adfe7c-4a18-11f0-95e9-0a262c404227";
+const USER_CUSTOM_FLAIR_ID_2 = "22828506-cad6-11eb-ba90-0e07bb4c3bf9";
 
-const NO_ELO_USER_FLAIR_IDS = [CUSTOM_1_FLAIR_ID, CUSTOM_2_FLAIR_ID];
+const NO_ELO_USER_FLAIR_IDS = [USER_CUSTOM_FLAIR_ID_1, USER_CUSTOM_FLAIR_ID_2];
 
 const TEXTFISH_FLAIR_TEMPLATE_ID = "65d18ba6-5e8c-11f0-ba88-065f6e5afca9";
 
@@ -173,10 +168,10 @@ function getGeminiConfig() {
 
   let finalSystemPrompt = SYSTEM_PROMPT.replace(
     "// ANCHOR_FOR_SUPERBRILLIANT",
-    dayOfWeek === "Saturday" ? SUPERBRILLIANT_TEXT : ""
+    dayOfWeek === "Saturday" ? SUPERBRILLIANT_TEXT : "",
   ).replace(
     "// ANCHOR_FOR_MEGABLUNDER",
-    dayOfWeek === "Monday" ? MEGABLUNDER_TEXT : ""
+    dayOfWeek === "Monday" ? MEGABLUNDER_TEXT : "",
   );
 
   const responseSchema = {
@@ -362,7 +357,7 @@ function normalizeClassifications(analysis: Analysis): void {
 
 function getNormalizedCommentBody(
   botUsername: string,
-  comment: Comment
+  comment: Comment,
 ): string {
   if (comment.authorName === botUsername) {
     const annotationMatch = comment.body.match(ANNOTATION_REGEX);
@@ -376,7 +371,7 @@ function getNormalizedCommentBody(
   // Replace preview.redd.it image links with [image]
   body = body.replace(
     /https?:\/\/preview\.redd\.it\/[\w\-\?=&#%\.]+/g,
-    "[image]"
+    "[image]",
   );
 
   // Replace markdown links [text](url) with just text
@@ -418,7 +413,7 @@ function getConvoText(messages: Message[]): string {
 
 async function getEmbedding(
   ai: GoogleGenAI,
-  convoText: string
+  convoText: string,
 ): Promise<number[]> {
   const res = await ai.models.embedContent({
     model: "gemini-embedding-exp-03-07",
@@ -433,7 +428,7 @@ async function getEmbedding(
 
 async function findSimilarConversations(
   pineconeIndex: Index<RecordMetadata>,
-  embedding: number[]
+  embedding: number[],
 ): Promise<PineconeMatch[]> {
   const queryResult = await pineconeIndex.query({
     vector: embedding,
@@ -442,7 +437,8 @@ async function findSimilarConversations(
 
   return queryResult.matches
     .filter(
-      (match) => match.score && match.score >= MIN_CONVERSATION_SIMILARITY_SCORE
+      (match) =>
+        match.score && match.score >= MIN_CONVERSATION_SIMILARITY_SCORE,
     )
     .map((match) => ({ id: match.id, score: match.score! }));
 }
@@ -452,17 +448,17 @@ async function getGeminiAnalysis(
   imageUrls: string[],
   postId: string,
   postTitle: string,
-  postBody: string | undefined
+  postBody: string | undefined,
 ): Promise<Analysis | undefined> {
   if (!imageUrls.length) {
     console.log(
-      `[${postId}] No processable images found in post or its source. Skipping.`
+      `[${postId}] No processable images found in post or its source. Skipping.`,
     );
     return;
   }
 
   console.log(
-    `[${postId}] Found ${imageUrls.length} image(s) to analyze. Fetching content...`
+    `[${postId}] Found ${imageUrls.length} image(s) to analyze. Fetching content...`,
   );
 
   const geminiImageParts = [];
@@ -472,7 +468,7 @@ async function getGeminiAnalysis(
       const response = await fetch(url);
       if (!response.ok) {
         console.error(
-          `[${postId}] Failed to fetch image at ${url}: ${response.status} ${response.statusText}`
+          `[${postId}] Failed to fetch image at ${url}: ${response.status} ${response.statusText}`,
         );
         return null;
       }
@@ -489,14 +485,14 @@ async function getGeminiAnalysis(
     }
   } catch (error) {
     console.error(
-      `[${postId}] An error occurred while fetching images: ${error}`
+      `[${postId}] An error occurred while fetching images: ${error}`,
     );
     return;
   }
 
   if (!geminiImageParts.length) {
     console.log(
-      `[${postId}] All image fetches failed or returned no data. Skipping.`
+      `[${postId}] All image fetches failed or returned no data. Skipping.`,
     );
     return;
   }
@@ -504,12 +500,11 @@ async function getGeminiAnalysis(
   const dynamicConfig = getGeminiConfig();
 
   console.log(
-    `[${postId}] Sending ${geminiImageParts.length} image(s) to Gemini with a structured schema.`
+    `[${postId}] Sending ${geminiImageParts.length} image(s) to Gemini with a structured schema.`,
   );
 
   const geminiResponse = await ai.models.generateContent({
-    // model: "gemini-2.5-flash",
-    model: "gemini-2.5-pro",
+    model: "gemini-3-flash-preview",
     contents: [
       createUserContent([
         `Reddit Post Title: "${postTitle}"\n\nReddit Post Body: "${
@@ -557,7 +552,7 @@ async function getGeminiAnalysis(
 
   if (!geminiResponseText) {
     console.log(
-      `[${postId}] Gemini gave an undefined or empty response text. Skipping.`
+      `[${postId}] Gemini gave an undefined or empty response text. Skipping.`,
     );
     return;
   }
@@ -568,13 +563,13 @@ async function getGeminiAnalysis(
   } catch (parseError) {
     console.error(
       `[${postId}] Failed to parse Gemini JSON response: ${parseError}`,
-      geminiResponseText
+      geminiResponseText,
     );
     return;
   }
 
   console.log(
-    `[${postId}] Parsed Gemini response: ${JSON.stringify(analysis)}`
+    `[${postId}] Parsed Gemini response: ${JSON.stringify(analysis)}`,
   );
 
   return analysis;
@@ -584,7 +579,7 @@ async function dispatchGitHubAction(
   context: TriggerContext,
   uid: string,
   renderData: Analysis | RedditComment[],
-  command: string
+  command: string,
 ): Promise<void> {
   const { settings } = context;
 
@@ -611,7 +606,7 @@ async function dispatchGitHubAction(
   if (!dispatchResponse.ok) {
     const errorText = await dispatchResponse.text();
     throw new Error(
-      `Failed to dispatch GitHub Action: ${dispatchResponse.status} ${errorText}`
+      `Failed to dispatch GitHub Action: ${dispatchResponse.status} ${errorText}`,
     );
   }
   console.log(`${[uid]} GitHub Action dispatched successfully.`);
@@ -653,7 +648,10 @@ const annotateAnalysisForm = Devvit.createForm(
                 label: value,
                 value,
               })),
-            defaultValue: [msg.classification],
+            defaultValue: [
+              msg.classification,
+              // Classification.GOOD,
+            ],
             required: true,
           },
         ],
@@ -700,14 +698,14 @@ const annotateAnalysisForm = Devvit.createForm(
 
       ui.showToast({
         text: `Submitted successfully, please wait ~${Math.floor(
-          (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
+          (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000,
         )}s`,
         appearance: "success",
       });
     } catch (e: any) {
       ui.showToast("An unexpected error occured");
     }
-  }
+  },
 );
 
 const annotateRedditChainForm = Devvit.createForm(
@@ -729,7 +727,7 @@ const annotateRedditChainForm = Devvit.createForm(
               .filter(
                 (c) =>
                   c !== Classification.MEGABLUNDER &&
-                  c !== Classification.SUPERBRILLIANT
+                  c !== Classification.SUPERBRILLIANT,
               )
               .map((value) => ({
                 label: value,
@@ -754,21 +752,21 @@ const annotateRedditChainForm = Devvit.createForm(
 
     try {
       const commentChainData = await redis.hGetAll(
-        `${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`
+        `${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`,
       );
 
       const unlabeledCommentChain: RedditComment[] = JSON.parse(
-          commentChainData.commentChain
+          commentChainData.commentChain,
         ),
         commentChain: RedditComment[] = [];
       for (let i = 0; i < unlabeledCommentChain.length; i++) {
         if (!values[`classification_${i}`]) {
           if (i > 0 && values[`classification_${i - 1}`]) {
             ui.showToast(
-              "Error: Omitted messages must be at the beginning of the chain"
+              "Error: Omitted messages must be at the beginning of the chain",
             );
             await redis.del(
-              `${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`
+              `${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`,
             );
             return;
           }
@@ -785,7 +783,7 @@ const annotateRedditChainForm = Devvit.createForm(
         context,
         uid,
         commentChain,
-        "render_and_upload_reddit_chain"
+        "render_and_upload_reddit_chain",
       );
 
       const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
@@ -804,7 +802,7 @@ const annotateRedditChainForm = Devvit.createForm(
 
       ui.showToast({
         text: `Submitted successfully, please wait ~${Math.floor(
-          (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000
+          (RENDER_INITIAL_DELAY + RENDER_POLL_DELAY) / 1000,
         )}s`,
         appearance: "success",
       });
@@ -813,7 +811,7 @@ const annotateRedditChainForm = Devvit.createForm(
     }
 
     await redis.del(`${COMMENT_CHAIN_DATA_PREFIX}${commentId}_${userId}`);
-  }
+  },
 );
 
 Devvit.addMenuItem({
@@ -879,9 +877,8 @@ Devvit.addMenuItem({
     const { targetId } = event;
     const { redis, reddit, scheduler, settings, userId, ui } = context;
 
-    const geminiApiKey: string | undefined = await settings.get(
-      "GEMINI_API_KEY"
-    );
+    const geminiApiKey: string | undefined =
+      await settings.get("GEMINI_API_KEY");
     if (!geminiApiKey)
       throw new Error("GEMINI_API_KEY not set in app settings.");
 
@@ -909,7 +906,7 @@ Devvit.addMenuItem({
 
       if (post.gallery.length) {
         console.log(
-          `[${post.id}] Post content has ${post.gallery.length} items.`
+          `[${post.id}] Post content has ${post.gallery.length} items.`,
         );
         for (const galleryMedia of post.gallery) {
           imageUrls.push(galleryMedia.url);
@@ -921,7 +918,7 @@ Devvit.addMenuItem({
         imageUrls,
         post.id,
         post.title,
-        post.body
+        post.body,
       );
 
       if (!analysis) {
@@ -939,7 +936,7 @@ Devvit.addMenuItem({
       shouldVote = true;
     }
 
-    if (post.flair?.templateId === ANNOTATED_FLAIR_ID) return;
+    if (post.flair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) return;
 
     if (shouldVote) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
@@ -954,7 +951,7 @@ Devvit.addMenuItem({
             post.title,
             post.authorId!,
             NO_ELO_USER_FLAIR_IDS[0],
-            analysis.elo[analysis.vote_target]!
+            analysis.elo[analysis.vote_target]!,
           );
         } catch (e: any) {
           console.error(`[${post.id}] Error handling bot vote, skipping...`, e);
@@ -987,33 +984,27 @@ Devvit.addMenuItem({
   },
 });
 
-Devvit.addMenuItem({
-  label: "Force Info Comment",
-  location: "post",
-  forUserType: "moderator",
-  onPress: async (event, context) => {
-    const { targetId } = event;
-    const { reddit, ui } = context;
+// Devvit.addMenuItem({
+//   label: "Force Info Comment",
+//   location: "post",
+//   forUserType: "moderator",
+//   onPress: async (event, context) => {
+//     const { targetId } = event;
+//     const { reddit, ui } = context;
 
-    const post = await reddit.getPostById(targetId);
+//     const post = await reddit.getPostById(targetId);
 
-    if (post.flair?.templateId === ANNOTATED_FLAIR_ID) {
-      const comment = await reddit.submitComment({
-        id: post.id,
-        richtext: buildAnnotatedInfoComment(),
-      });
-      await comment.distinguish(true);
-    } else if (post.flair?.templateId === OPENING_FLAIR_ID) {
-      const comment = await reddit.submitComment({
-        id: post.id,
-        richtext: buildOpeningInfoComment(),
-      });
-      await comment.distinguish(true);
-    }
+//     if (post.flair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) {
+//       const comment = await reddit.submitComment({
+//         id: post.id,
+//         richtext: buildAnnotatedInfoComment(),
+//       });
+//       await comment.distinguish(true);
+//     }
 
-    ui.showToast("Commented successfully");
-  },
-});
+//     ui.showToast("Commented successfully");
+//   },
+// });
 
 Devvit.addMenuItem({
   label: "Delete Saved Analysis",
@@ -1111,7 +1102,7 @@ Devvit.addSchedulerJob({
             !ANNOTATION_REGEX.test(postComment.body)
           ) {
             console.log(
-              `[${originalId}] Already posted a comment to this post, aborting.`
+              `[${originalId}] Already posted a comment to this post, aborting.`,
             );
             return;
           }
@@ -1123,7 +1114,7 @@ Devvit.addSchedulerJob({
 
         for (const similarConversation of reviewSimilarConversations) {
           const similarConversationPost = await reddit.getPostById(
-            similarConversation.id
+            similarConversation.id,
           );
           similarConversation.title = similarConversationPost.title;
         }
@@ -1133,14 +1124,13 @@ Devvit.addSchedulerJob({
           reviewAnalysis.vote_target &&
           reviewAnalysis.color[reviewAnalysis.vote_target]
         )
-          reviewAnalysis.color[
-            reviewAnalysis.vote_target
-          ]!.label = `u/${post.authorName}`;
+          reviewAnalysis.color[reviewAnalysis.vote_target]!.label =
+            `u/${post.authorName}`;
 
         const richTextComment = buildReviewComment(
           reviewAnalysis,
           uploadResponse.mediaId,
-          reviewSimilarConversations
+          reviewSimilarConversations,
         );
 
         const comment = await reddit.submitComment({
@@ -1154,7 +1144,7 @@ Devvit.addSchedulerJob({
         const newCount = await redis.incrBy(ANALYSIS_COUNT_KEY, 1);
 
         const flairText = `:textfish:Textfish | ${Intl.NumberFormat(
-          "en-US"
+          "en-US",
         ).format(newCount)} Games Analyzed`;
         await reddit.setUserFlair({
           subredditName: subredditName!,
@@ -1167,13 +1157,13 @@ Devvit.addSchedulerJob({
       } catch (e: any) {
         console.error(
           `[${uid}] Error commenting analysis: ${e.message}`,
-          e.stack
+          e.stack,
         );
       }
     } else if (type === "annotate") {
       try {
         const requestingUsername = (await reddit.getUserById(
-          requestingUserId as string
+          requestingUserId as string,
         ))!.username;
 
         if (pmAnnotation) {
@@ -1186,7 +1176,7 @@ Devvit.addSchedulerJob({
         } else {
           const richTextComment = buildAnnotateComment(
             requestingUsername,
-            uploadResponse.mediaId
+            uploadResponse.mediaId,
           );
 
           const comment = await reddit.submitComment({
@@ -1198,7 +1188,7 @@ Devvit.addSchedulerJob({
       } catch (e: any) {
         console.error(
           `[${uid}] Error commenting/sending annotation: ${e.message}`,
-          e.stack
+          e.stack,
         );
       }
     } else if (type === "annotate_reddit_chain") {
@@ -1207,7 +1197,7 @@ Devvit.addSchedulerJob({
           .url;
 
         const requestingUsername = (await reddit.getUserById(
-          requestingUserId as string
+          requestingUserId as string,
         ))!.username;
 
         if (pmAnnotation) {
@@ -1219,7 +1209,7 @@ Devvit.addSchedulerJob({
         } else {
           const richTextComment = buildAnnotateComment(
             requestingUsername,
-            uploadResponse.mediaId
+            uploadResponse.mediaId,
           );
 
           const comment = await reddit.submitComment({
@@ -1231,7 +1221,7 @@ Devvit.addSchedulerJob({
       } catch (e: any) {
         console.error(
           `[${uid}] Error commenting/sending reddit chain annotation: ${e.message}`,
-          e.stack
+          e.stack,
         );
       }
     }
@@ -1242,15 +1232,14 @@ Devvit.addTrigger({
   event: "PostCreate",
   onEvent: async (event, context) => {
     const { post, subreddit } = event;
-    const { redis, reddit, scheduler, settings, subredditName } = context;
+    const { redis, reddit, scheduler, settings } = context;
 
     if (!post || post.deleted) return;
 
     console.log(`[${post.id}] New post in r/${subreddit?.name}.`);
 
-    const geminiApiKey: string | undefined = await settings.get(
-      "GEMINI_API_KEY"
-    );
+    const geminiApiKey: string | undefined =
+      await settings.get("GEMINI_API_KEY");
     if (!geminiApiKey) {
       console.error("GEMINI_API_KEY not set in app settings.");
       return;
@@ -1258,9 +1247,8 @@ Devvit.addTrigger({
 
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    const pineconeApiKey: string | undefined = await settings.get(
-      "PINECONE_API_KEY"
-    );
+    const pineconeApiKey: string | undefined =
+      await settings.get("PINECONE_API_KEY");
     if (!pineconeApiKey) {
       console.error("PINECONE_API_KEY not set in app settings.");
       return;
@@ -1275,23 +1263,8 @@ Devvit.addTrigger({
     if (
       post.linkFlair &&
       NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
-    ) {
-      if (post.linkFlair.templateId === ANNOTATED_FLAIR_ID) {
-        const comment = await reddit.submitComment({
-          id: post.id,
-          richtext: buildAnnotatedInfoComment(),
-        });
-        await comment.distinguish(true);
-      } else if (post.linkFlair.templateId === OPENING_FLAIR_ID) {
-        const comment = await reddit.submitComment({
-          id: post.id,
-          richtext: buildOpeningInfoComment(),
-        });
-        await comment.distinguish(true);
-      }
-
+    )
       return;
-    }
 
     const postDataKey = `${POST_DATA_PREFIX}${post.id}`;
     const isVotePost = true;
@@ -1300,27 +1273,27 @@ Devvit.addTrigger({
 
     if (!newField) {
       console.log(
-        `[${post.id}] Post is already being processed or complete. Skipping.`
+        `[${post.id}] Post is already being processed or complete. Skipping.`,
       );
       return;
     }
 
     console.log(
-      `[${post.id}] Acquired lock via 'elo_votes' and initialized with empty votes.`
+      `[${post.id}] Acquired lock via 'elo_votes' and initialized with empty votes.`,
     );
 
     const imageUrls: string[] = [];
 
     if (post.crosspostParentId) {
       console.log(
-        `[${post.id}] Post is a crosspost. Fetching original post ${post.crosspostParentId}...`
+        `[${post.id}] Post is a crosspost. Fetching original post ${post.crosspostParentId}...`,
       );
       let sourcePost;
       try {
         sourcePost = await reddit.getPostById(post.crosspostParentId);
       } catch (error) {
         console.error(
-          `[${post.id}] Failed to fetch crosspost parent ${post.crosspostParentId}: ${error}`
+          `[${post.id}] Failed to fetch crosspost parent ${post.crosspostParentId}: ${error}`,
         );
         return;
       }
@@ -1331,7 +1304,7 @@ Devvit.addTrigger({
     } else {
       if (post.isGallery) {
         console.log(
-          `[${post.id}] Post content is a gallery with ${post.galleryImages.length} items.`
+          `[${post.id}] Post content is a gallery with ${post.galleryImages.length} items.`,
         );
         for (const url of post.galleryImages) {
           imageUrls.push(url);
@@ -1347,7 +1320,7 @@ Devvit.addTrigger({
       imageUrls,
       post.id,
       post.title,
-      post.selftext
+      post.selftext,
     );
 
     if (!analysis) return;
@@ -1359,7 +1332,7 @@ Devvit.addTrigger({
     });
     console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
-    if (post.linkFlair?.templateId === ANNOTATED_FLAIR_ID) return;
+    if (post.linkFlair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) return;
 
     if (isVotePost) {
       console.log(`[${post.id}] Elo vote post detected... voting`);
@@ -1374,7 +1347,7 @@ Devvit.addTrigger({
             post.title,
             post.authorId,
             post.authorFlair?.templateId,
-            analysis.elo[analysis.vote_target]!
+            analysis.elo[analysis.vote_target]!,
           );
         } catch (e: any) {
           console.error(`[${post.id}] Error handling bot vote, skipping...`, e);
@@ -1390,7 +1363,7 @@ Devvit.addTrigger({
 
       similarConversations = await findSimilarConversations(
         pineconeIndex,
-        embedding
+        embedding,
       );
 
       await pineconeIndex.upsert([
@@ -1429,9 +1402,8 @@ Devvit.addTrigger({
     const { postId } = event;
     const { appName, redis, reddit, settings } = context;
 
-    const pineconeApiKey: string | undefined = await settings.get(
-      "PINECONE_API_KEY"
-    );
+    const pineconeApiKey: string | undefined =
+      await settings.get("PINECONE_API_KEY");
     if (!pineconeApiKey)
       throw new Error("PINECONE_API_KEY not set in app settings.");
 
@@ -1459,7 +1431,7 @@ Devvit.addTrigger({
           } catch (e: any) {
             console.error(
               `[${postId}] Failed to delete bot comment ${comment.id}:`,
-              e
+              e,
             );
           }
         }
@@ -1602,7 +1574,7 @@ async function handleEloVote(
   postTitle: string,
   postAuthorId: string,
   postAuthorFlairTemplateId: string | undefined,
-  vote: number
+  vote: number,
 ): Promise<void> {
   const { redis, reddit, subredditName } = context;
 
@@ -1625,7 +1597,7 @@ async function handleEloVote(
   });
 
   console.log(
-    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes is now: ${newElo}`
+    `[${postId}] Vote: ${clampedVote}. Recalculated Elo from ${newVoteCount} votes is now: ${newElo}`,
   );
 
   await redis.zAdd(LEADERBOARD_KEY, {
@@ -1662,7 +1634,7 @@ async function handleEloVote(
 
       const postAuthor = (await reddit.getUserById(postAuthorId))!;
       const postAuthorFlair = await postAuthor.getUserFlairBySubreddit(
-        subredditName!
+        subredditName!,
       );
 
       let curUserElo: number | undefined;
@@ -1683,7 +1655,7 @@ async function handleEloVote(
         });
 
         console.log(
-          `[${postId}] User flair updated to "${postAuthorFlairText}"`
+          `[${postId}] User flair updated to "${postAuthorFlairText}"`,
         );
 
         if (!curUserElo) {
@@ -1707,12 +1679,11 @@ async function handleUserEloVote(
   context: TriggerContext,
   post: PostV2,
   author: UserV2,
-  voteValue: number
+  voteValue: number,
 ) {
   if (
     post.linkFlair &&
-    (NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId) ||
-      post.linkFlair.templateId === ANNOTATED_FLAIR_ID)
+    NO_ANALYSIS_FLAIR_IDS.includes(post.linkFlair.templateId)
   )
     return;
 
@@ -1735,12 +1706,12 @@ async function handleUserEloVote(
       post.title,
       post.authorId,
       post.authorFlair?.templateId,
-      voteValue
+      voteValue,
     );
 }
 
 function getClassificationAccuracy(
-  classification: CountedClassification
+  classification: CountedClassification,
 ): number {
   const { accuracy, radius } = CLASSIFICATION_ACCURACY_INFO[classification];
   const jitter = (Math.random() * 2 - 1) * radius;
@@ -1749,7 +1720,7 @@ function getClassificationAccuracy(
 
 function getAccuracyString(
   messages: Message[],
-  side: "left" | "right"
+  side: "left" | "right",
 ): string {
   let totalScore = 0;
   let classifiedMovesCount = 0;
@@ -1759,7 +1730,7 @@ function getAccuracyString(
   for (const message of playerMessages) {
     if (message.classification in CLASSIFICATION_ACCURACY_INFO) {
       totalScore += getClassificationAccuracy(
-        message.classification as CountedClassification
+        message.classification as CountedClassification,
       );
       classifiedMovesCount++;
     }
@@ -1777,7 +1748,7 @@ function getAccuracyString(
 function buildReviewComment(
   analysis: Analysis,
   mediaId: string,
-  similarConversations: PineconeMatch[]
+  similarConversations: PineconeMatch[],
 ): RichTextBuilder {
   const counts: Record<CountedClassification, { left: number; right: number }> =
     {
@@ -1807,7 +1778,7 @@ function buildReviewComment(
       p.text({
         text: "✪ Game Review",
         formatting: [[1, 0, 13]],
-      })
+      }),
     )
     .paragraph((p) => p.text({ text: analysis.comment }))
     .image({ mediaId })
@@ -1815,7 +1786,7 @@ function buildReviewComment(
       p.text({
         text: analysis.opening_name,
         formatting: [[2, 0, analysis.opening_name.length]],
-      })
+      }),
     )
     .table((table) => {
       table.headerCell({ columnAlignment: "left" }, () => {});
@@ -1825,7 +1796,7 @@ function buildReviewComment(
             text:
               analysis.color.left!.label +
               (analysis.vote_target === "left" ? " [Vote]" : ""),
-          })
+          }),
         );
       if (hasRight)
         table.headerCell({ columnAlignment: "center" }, (cell) =>
@@ -1833,7 +1804,7 @@ function buildReviewComment(
             text:
               analysis.color.right!.label +
               (analysis.vote_target === "right" ? " [Vote]" : ""),
-          })
+          }),
         );
 
       table.row((row) => {
@@ -1842,13 +1813,13 @@ function buildReviewComment(
           row.cell((cell) =>
             cell.text({
               text: `\`${getAccuracyString(analysis.messages, "left")}\``,
-            })
+            }),
           );
         if (hasRight)
           row.cell((cell) =>
             cell.text({
               text: `\`${getAccuracyString(analysis.messages, "right")}\``,
-            })
+            }),
           );
       });
 
@@ -1875,7 +1846,7 @@ function buildReviewComment(
             cell.text({
               text: `${key} (${classificationUnicode})`,
               formatting: [[1, key.length + 2, classificationUnicode.length]],
-            })
+            }),
           );
           if (hasLeft)
             row.cell((cell) => cell.text({ text: value.left.toString() }));
@@ -1896,13 +1867,13 @@ function buildReviewComment(
           row.cell((cell) =>
             cell.text({
               text: `\`${analysis.elo.left!}\``,
-            })
+            }),
           );
         if (hasRight)
           row.cell((cell) =>
             cell.text({
               text: `\`${analysis.elo.right!}\``,
-            })
+            }),
           );
       });
     });
@@ -1918,9 +1889,9 @@ function buildReviewComment(
                 .postLink({
                   permalink: `/r/TextingTheory/comments/${match.id}`,
                 })
-                .text({ text: ` (${(match.score * 100).toFixed(1)}%)` })
-            )
-          )
+                .text({ text: ` (${(match.score * 100).toFixed(1)}%)` }),
+            ),
+          ),
         );
       });
   }
@@ -1962,7 +1933,7 @@ function buildReviewComment(
         text: "Annotate",
         formatting: [[32, 0, 8]],
         url: MORE_ANNOTATION_INFO_LINK,
-      })
+      }),
   );
 
   return builder;
@@ -1970,7 +1941,7 @@ function buildReviewComment(
 
 function buildAnnotateComment(
   requestingUsername: string,
-  mediaId: string
+  mediaId: string,
 ): RichTextBuilder {
   return new RichTextBuilder()
     .image({ mediaId })
@@ -1980,49 +1951,7 @@ function buildAnnotateComment(
         text: "make your own",
         formatting: [[32, 0, 13]],
         url: MORE_ANNOTATION_INFO_LINK,
-      })
-    );
-}
-
-function buildAnnotatedInfoComment(): RichTextBuilder {
-  return new RichTextBuilder()
-    .paragraph((p) =>
-      p.text({
-        text: "Note: This post is Annotated",
-        formatting: [
-          [1, 0, 4],
-          [1, 19, 9],
-        ],
-      })
-    )
-    .paragraph((p) =>
-      p.text({
-        text: "`!elo` votes will have no effect",
-      })
-    );
-}
-
-function buildOpeningInfoComment(): RichTextBuilder {
-  return new RichTextBuilder()
-    .paragraph((p) =>
-      p.text({
-        text: "Note: This post showcases an Opening",
-        formatting: [
-          [1, 0, 4],
-          [1, 29, 7],
-        ],
-      })
-    )
-    .paragraph((p) =>
-      p.text({
-        text: "!elo votes will have no effect",
-      })
-    )
-    .paragraph((p) =>
-      p.text({
-        text: "Coming soon: voting on the opening's classification",
-        formatting: [[2, 0, 51]],
-      })
+      }),
     );
 }
 
