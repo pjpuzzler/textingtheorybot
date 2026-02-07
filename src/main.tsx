@@ -1040,7 +1040,7 @@ Devvit.addSchedulerJob({
     } = event.data!;
     const { media, reddit, redis, scheduler, subredditName, appName } = context;
 
-    const baseUrl = "https://cdn.allthepics.net/images";
+    const baseUrl = "https://i.allthepics.net";
     const datePath = formatDateAsPath(new Date());
     const filename = `${uid}.png`;
     const imageUrl = `${baseUrl}/${datePath}/${filename}`;
