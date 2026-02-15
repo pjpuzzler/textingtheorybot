@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "textingtheorybot",
+  "blocks": {
+    "entry": "src/main.tsx",
+    "triggers": ["onPostCreate", "onPostDelete", "onCommentCreate"]
+  },
+  "marketingAssets": {
+    "icon": "assets/textfish.png"
+  }
+}

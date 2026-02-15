@@ -38,6 +38,7 @@ const MAX_VOTE_VALUE = 3000;
 const MIN_VOTES_FOR_POST_FLAIR = 1;
 const MIN_KARMA_TO_VOTE = 10;
 const MIN_AGE_TO_VOTE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_AGE_TO_ANNOTATE_MS = 1 * 24 * 60 * 60 * 1000;
 const MIN_VOTES_FOR_USER_FLAIR = 10;
 
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
@@ -814,60 +815,72 @@ const annotateRedditChainForm = Devvit.createForm(
   },
 );
 
-Devvit.addMenuItem({
-  label: "Annotate",
-  location: "post",
-  onPress: async (event, context) => {
-    const { targetId } = event;
-    const { redis, ui } = context;
+// Devvit.addMenuItem({
+//   label: "Annotate",
+//   location: "post",
+//   onPress: async (event, context) => {
+//     const { targetId } = event;
+//     const { reddit, redis, ui } = context;
 
-    const postData = await redis.hGetAll(`${POST_DATA_PREFIX}${targetId}`);
-    if (!postData.analysis) {
-      ui.showToast("No analysis found for this post");
-      return;
-    }
+//     const post = await reddit.getPostById(targetId);
+//     if (Date.now() - post.createdAt.getTime() >= MAX_AGE_TO_ANNOTATE_MS) {
+//       ui.showToast("Cannot annotate posts older than 1 day");
+//       return;
+//     }
 
-    const analysis: Analysis = JSON.parse(postData.analysis);
-    ui.showForm(annotateAnalysisForm, { analysis });
-  },
-});
+//     const postData = await redis.hGetAll(`${POST_DATA_PREFIX}${targetId}`);
+//     if (!postData.analysis) {
+//       ui.showToast("No AI transcription available for this post");
+//       return;
+//     }
 
-Devvit.addMenuItem({
-  label: "Annotate",
-  location: "comment",
-  onPress: async (event, context) => {
-    const { targetId } = event;
-    const { appName, redis, reddit, ui, userId } = context;
+//     const analysis: Analysis = JSON.parse(postData.analysis);
+//     ui.showForm(annotateAnalysisForm, { analysis });
+//   },
+// });
 
-    let commentChain = [],
-      nextId = targetId;
+// Devvit.addMenuItem({
+//   label: "Annotate",
+//   location: "comment",
+//   onPress: async (event, context) => {
+//     const { targetId } = event;
+//     const { appName, redis, reddit, ui, userId } = context;
 
-    do {
-      const comment = await reddit.getCommentById(nextId);
-      if (
-        !comment.removed &&
-        comment.authorName !== "TextingTheory-ModTeam" &&
-        comment.authorName !== "AutoModerator"
-      ) {
-        const redditComment: RedditComment = {
-          username: comment.authorName,
-          content: getNormalizedCommentBody(appName, comment),
-        };
-        commentChain.unshift(redditComment);
-      } else if (!commentChain.length) {
-        ui.showToast("Error: Cannot annotate this comment");
-        return;
-      }
-      nextId = comment.parentId;
-    } while (nextId.startsWith("t1_"));
+//     const comment = await reddit.getCommentById(targetId);
+//     if (Date.now() - comment.createdAt.getTime() >= MAX_AGE_TO_ANNOTATE_MS) {
+//       ui.showToast("Cannot annotate comments older than 1 day");
+//       return;
+//     }
 
-    await redis.hSet(`${COMMENT_CHAIN_DATA_PREFIX}${targetId}_${userId}`, {
-      commentChain: JSON.stringify(commentChain),
-    });
+//     let commentChain = [],
+//       nextId = targetId;
 
-    ui.showForm(annotateRedditChainForm, { commentChain });
-  },
-});
+//     do {
+//       const comment = await reddit.getCommentById(nextId);
+//       if (
+//         !comment.removed &&
+//         comment.authorName !== "TextingTheory-ModTeam" &&
+//         comment.authorName !== "AutoModerator"
+//       ) {
+//         const redditComment: RedditComment = {
+//           username: comment.authorName,
+//           content: getNormalizedCommentBody(appName, comment),
+//         };
+//         commentChain.unshift(redditComment);
+//       } else if (!commentChain.length) {
+//         ui.showToast("Error: Cannot annotate this comment");
+//         return;
+//       }
+//       nextId = comment.parentId;
+//     } while (nextId.startsWith("t1_"));
+
+//     await redis.hSet(`${COMMENT_CHAIN_DATA_PREFIX}${targetId}_${userId}`, {
+//       commentChain: JSON.stringify(commentChain),
+//     });
+
+//     ui.showForm(annotateRedditChainForm, { commentChain });
+//   },
+// });
 
 Devvit.addMenuItem({
   label: "Force Analysis",
@@ -877,8 +890,9 @@ Devvit.addMenuItem({
     const { targetId } = event;
     const { redis, reddit, scheduler, settings, userId, ui } = context;
 
-    const geminiApiKey: string | undefined =
-      await settings.get("GEMINI_API_KEY");
+    const geminiApiKey: string | undefined = await settings.get(
+      "GEMINI_API_KEY",
+    );
     if (!geminiApiKey)
       throw new Error("GEMINI_API_KEY not set in app settings.");
 
@@ -983,28 +997,6 @@ Devvit.addMenuItem({
     }
   },
 });
-
-// Devvit.addMenuItem({
-//   label: "Force Info Comment",
-//   location: "post",
-//   forUserType: "moderator",
-//   onPress: async (event, context) => {
-//     const { targetId } = event;
-//     const { reddit, ui } = context;
-
-//     const post = await reddit.getPostById(targetId);
-
-//     if (post.flair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) {
-//       const comment = await reddit.submitComment({
-//         id: post.id,
-//         richtext: buildAnnotatedInfoComment(),
-//       });
-//       await comment.distinguish(true);
-//     }
-
-//     ui.showToast("Commented successfully");
-//   },
-// });
 
 Devvit.addMenuItem({
   label: "Delete Saved Analysis",
@@ -1124,8 +1116,9 @@ Devvit.addSchedulerJob({
           reviewAnalysis.vote_target &&
           reviewAnalysis.color[reviewAnalysis.vote_target]
         )
-          reviewAnalysis.color[reviewAnalysis.vote_target]!.label =
-            `u/${post.authorName}`;
+          reviewAnalysis.color[
+            reviewAnalysis.vote_target
+          ]!.label = `u/${post.authorName}`;
 
         const richTextComment = buildReviewComment(
           reviewAnalysis,
@@ -1143,9 +1136,9 @@ Devvit.addSchedulerJob({
 
         const newCount = await redis.incrBy(ANALYSIS_COUNT_KEY, 1);
 
-        const flairText = `:textfish:Textfish | ${Intl.NumberFormat(
-          "en-US",
-        ).format(newCount)} Games Analyzed`;
+        const flairText = `:logo:${Intl.NumberFormat("en-US").format(
+          newCount,
+        )} Games Analyzed`;
         await reddit.setUserFlair({
           subredditName: subredditName!,
           username: appName,
@@ -1183,7 +1176,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          await comment.distinguish();
+          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1216,7 +1209,7 @@ Devvit.addSchedulerJob({
             id: originalId as string,
             richtext: richTextComment,
           });
-          await comment.distinguish(true);
+          // await comment.distinguish();
         }
       } catch (e: any) {
         console.error(
@@ -1238,8 +1231,9 @@ Devvit.addTrigger({
 
     console.log(`[${post.id}] New post in r/${subreddit?.name}.`);
 
-    const geminiApiKey: string | undefined =
-      await settings.get("GEMINI_API_KEY");
+    const geminiApiKey: string | undefined = await settings.get(
+      "GEMINI_API_KEY",
+    );
     if (!geminiApiKey) {
       console.error("GEMINI_API_KEY not set in app settings.");
       return;
@@ -1247,18 +1241,19 @@ Devvit.addTrigger({
 
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    const pineconeApiKey: string | undefined =
-      await settings.get("PINECONE_API_KEY");
-    if (!pineconeApiKey) {
-      console.error("PINECONE_API_KEY not set in app settings.");
-      return;
-    }
+    // const pineconeApiKey: string | undefined = await settings.get(
+    //   "PINECONE_API_KEY",
+    // );
+    // if (!pineconeApiKey) {
+    //   console.error("PINECONE_API_KEY not set in app settings.");
+    //   return;
+    // }
 
-    const pc = new Pinecone({
-      apiKey: pineconeApiKey,
-    });
+    // const pc = new Pinecone({
+    //   apiKey: pineconeApiKey,
+    // });
 
-    const pineconeIndex = pc.Index("texting-theory");
+    // const pineconeIndex = pc.Index("texting-theory");
 
     if (
       post.linkFlair &&
@@ -1282,117 +1277,117 @@ Devvit.addTrigger({
       `[${post.id}] Acquired lock via 'elo_votes' and initialized with empty votes.`,
     );
 
-    const imageUrls: string[] = [];
+    // const imageUrls: string[] = [];
 
-    if (post.crosspostParentId) {
-      console.log(
-        `[${post.id}] Post is a crosspost. Fetching original post ${post.crosspostParentId}...`,
-      );
-      let sourcePost;
-      try {
-        sourcePost = await reddit.getPostById(post.crosspostParentId);
-      } catch (error) {
-        console.error(
-          `[${post.id}] Failed to fetch crosspost parent ${post.crosspostParentId}: ${error}`,
-        );
-        return;
-      }
+    // if (post.crosspostParentId) {
+    //   console.log(
+    //     `[${post.id}] Post is a crosspost. Fetching original post ${post.crosspostParentId}...`,
+    //   );
+    //   let sourcePost;
+    //   try {
+    //     sourcePost = await reddit.getPostById(post.crosspostParentId);
+    //   } catch (error) {
+    //     console.error(
+    //       `[${post.id}] Failed to fetch crosspost parent ${post.crosspostParentId}: ${error}`,
+    //     );
+    //     return;
+    //   }
 
-      for (const galleryMedia of sourcePost.gallery) {
-        imageUrls.push(galleryMedia.url);
-      }
-    } else {
-      if (post.isGallery) {
-        console.log(
-          `[${post.id}] Post content is a gallery with ${post.galleryImages.length} items.`,
-        );
-        for (const url of post.galleryImages) {
-          imageUrls.push(url);
-        }
-      } else if (post.isImage && post.url) {
-        console.log(`[${post.id}] Post content is a single image.`);
-        imageUrls.push(post.url);
-      }
-    }
+    //   for (const galleryMedia of sourcePost.gallery) {
+    //     imageUrls.push(galleryMedia.url);
+    //   }
+    // } else {
+    //   if (post.isGallery) {
+    //     console.log(
+    //       `[${post.id}] Post content is a gallery with ${post.galleryImages.length} items.`,
+    //     );
+    //     for (const url of post.galleryImages) {
+    //       imageUrls.push(url);
+    //     }
+    //   } else if (post.isImage && post.url) {
+    //     console.log(`[${post.id}] Post content is a single image.`);
+    //     imageUrls.push(post.url);
+    //   }
+    // }
 
-    const analysis = await getGeminiAnalysis(
-      ai,
-      imageUrls,
-      post.id,
-      post.title,
-      post.selftext,
-    );
+    // const analysis = await getGeminiAnalysis(
+    //   ai,
+    //   imageUrls,
+    //   post.id,
+    //   post.title,
+    //   post.selftext,
+    // );
 
-    if (!analysis) return;
+    // if (!analysis) return;
 
-    normalizeClassifications(analysis);
+    // normalizeClassifications(analysis);
 
-    await redis.hSet(postDataKey, {
-      analysis: JSON.stringify(analysis),
-    });
-    console.log(`[${post.id}] Analysis stored in Redis Hash.`);
+    // await redis.hSet(postDataKey, {
+    //   analysis: JSON.stringify(analysis),
+    // });
+    // console.log(`[${post.id}] Analysis stored in Redis Hash.`);
 
-    if (post.linkFlair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) return;
+    // if (post.linkFlair?.templateId === HAS_CHESS_SYMBOLS_FLAIR_ID) return;
 
-    if (isVotePost) {
-      console.log(`[${post.id}] Elo vote post detected... voting`);
+    // if (isVotePost) {
+    //   console.log(`[${post.id}] Elo vote post detected... voting`);
 
-      if (!analysis.vote_target || !analysis.elo[analysis.vote_target])
-        console.log(`[${post.id}] No valid Elo found... skipping`);
-      else {
-        try {
-          await handleEloVote(
-            context,
-            post.id,
-            post.title,
-            post.authorId,
-            post.authorFlair?.templateId,
-            analysis.elo[analysis.vote_target]!,
-          );
-        } catch (e: any) {
-          console.error(`[${post.id}] Error handling bot vote, skipping...`, e);
-        }
-      }
-    }
+    //   if (!analysis.vote_target || !analysis.elo[analysis.vote_target])
+    //     console.log(`[${post.id}] No valid Elo found... skipping`);
+    //   else {
+    //     try {
+    //       await handleEloVote(
+    //         context,
+    //         post.id,
+    //         post.title,
+    //         post.authorId,
+    //         post.authorFlair?.templateId,
+    //         analysis.elo[analysis.vote_target]!,
+    //       );
+    //     } catch (e: any) {
+    //       console.error(`[${post.id}] Error handling bot vote, skipping...`, e);
+    //     }
+    //   }
+    // }
 
-    let similarConversations: PineconeMatch[] = [];
+    // let similarConversations: PineconeMatch[] = [];
 
-    try {
-      const convoText = getConvoText(analysis.messages);
-      const embedding = await getEmbedding(ai, convoText);
+    // try {
+    //   const convoText = getConvoText(analysis.messages);
+    //   const embedding = await getEmbedding(ai, convoText);
 
-      similarConversations = await findSimilarConversations(
-        pineconeIndex,
-        embedding,
-      );
+    //   similarConversations = await findSimilarConversations(
+    //     pineconeIndex,
+    //     embedding,
+    //   );
 
-      await pineconeIndex.upsert([
-        { id: post.id, values: embedding, metadata: { convoText } },
-      ]);
-    } catch (e: any) {
-      console.error("Error with embedding/Pinecone", e);
-    }
+    //   await pineconeIndex.upsert([
+    //     { id: post.id, values: embedding, metadata: { convoText } },
+    //   ]);
+    // } catch (e: any) {
+    //   console.error("Error with embedding/Pinecone", e);
+    // }
 
-    const uid = `analysis_${post.id}`;
+    // const uid = `analysis_${post.id}`;
 
-    await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
+    // await dispatchGitHubAction(context, uid, analysis, "render_and_upload");
 
-    const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
-    try {
-      await scheduler.runJob({
-        name: "comment_analysis",
-        data: {
-          analysis,
-          similarConversations,
-          originalId: post.id,
-          uid,
-          type: "analysis",
-        },
-        runAt,
-      });
-    } catch (e: any) {
-      console.error("Error scheduling future comment");
-    }
+    // const runAt = new Date(Date.now() + RENDER_INITIAL_DELAY);
+    // try {
+    //   await scheduler.runJob({
+    //     name: "comment_analysis",
+    //     data: {
+    //       analysis,
+    //       similarConversations,
+    //       originalId: post.id,
+    //       uid,
+    //       type: "analysis",
+    //     },
+    //     runAt,
+    //   });
+    // } catch (e: any) {
+    //   console.error("Error scheduling future comment");
+    // }
   },
 });
 
@@ -1402,15 +1397,16 @@ Devvit.addTrigger({
     const { postId } = event;
     const { appName, redis, reddit, settings } = context;
 
-    const pineconeApiKey: string | undefined =
-      await settings.get("PINECONE_API_KEY");
-    if (!pineconeApiKey)
-      throw new Error("PINECONE_API_KEY not set in app settings.");
+    // const pineconeApiKey: string | undefined = await settings.get(
+    //   "PINECONE_API_KEY",
+    // );
+    // if (!pineconeApiKey)
+    //   throw new Error("PINECONE_API_KEY not set in app settings.");
 
-    const pc = new Pinecone({
-      apiKey: pineconeApiKey,
-    });
-    const pineconeIndex = pc.Index("texting-theory");
+    // const pc = new Pinecone({
+    //   apiKey: pineconeApiKey,
+    // });
+    // const pineconeIndex = pc.Index("texting-theory");
 
     try {
       const post = await reddit.getPostById(postId);
@@ -1449,12 +1445,12 @@ Devvit.addTrigger({
       console.error(`[${postId}] Error cleaning up Redis:`, e);
     }
 
-    try {
-      await pineconeIndex.deleteOne(postId);
-      console.log(`[${postId}] Pinecone entry deleted successfully.`);
-    } catch (e: any) {
-      console.error(`[${postId}] Error deleting Pinecone entry:`, e);
-    }
+    // try {
+    //   await pineconeIndex.deleteOne(postId);
+    //   console.log(`[${postId}] Pinecone entry deleted successfully.`);
+    // } catch (e: any) {
+    //   console.error(`[${postId}] Error deleting Pinecone entry:`, e);
+    // }
   },
 });
 
@@ -1479,45 +1475,6 @@ Devvit.addTrigger({
     await handleUserEloVote(context, post, author, voteValue);
   },
 });
-
-// Devvit.addTrigger({
-//   event: "CommentUpdate",
-//   onEvent: async (event, context) => {
-//     const { post, comment, previousBody, author } = event;
-//     const { reddit } = context;
-
-//     if (!post || !comment || !author) return;
-
-//     const eloVoteMatch = comment.body.match(ELO_VOTE_REGEX);
-//     if (!eloVoteMatch) return;
-//     const voteValue = parseInt(eloVoteMatch[1], 10);
-
-//     if (
-//       comment.spam &&
-//       !ELO_VOTE_REGEX.test(previousBody) &&
-//       eloVoteMatch
-//       // && comment.parentId.startsWith("t1_")
-//     ) {
-//       const postComment = await reddit.getCommentById(comment.id);
-//       for await (const reply of postComment.replies) {
-//         if (
-//           reply.authorName === "AutoModerator" &&
-//           reply.body.includes("`!elo <number>`")
-//         ) {
-//           await reply.remove();
-//           break;
-//         }
-//       }
-
-//       if (badVoteValue(voteValue))
-//         return;
-
-//       await reddit.approve(comment.id);
-
-//       await handleUserEloVote(context, post, author, voteValue);
-//     }
-//   },
-// });
 
 function badVoteValue(voteValue: number): boolean {
   return BANNED_VOTE_VALUES.includes(voteValue);
