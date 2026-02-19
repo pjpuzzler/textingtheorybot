@@ -125,7 +125,12 @@ function isVotingWindowOpen(): boolean {
 }
 
 function canVoteOnCurrentPost(): boolean {
-  return !!postData && postData.mode === "vote" && !isOwnPost() && isVotingWindowOpen();
+  return (
+    !!postData &&
+    postData.mode === "vote" &&
+    !isOwnPost() &&
+    isVotingWindowOpen()
+  );
 }
 
 function getCanvasRect() {
