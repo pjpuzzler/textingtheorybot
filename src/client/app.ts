@@ -957,6 +957,10 @@ function closePicker() {
 }
 
 pickerBg.addEventListener("click", closePicker);
+pickerBg.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  closePicker();
+});
 window.addEventListener("resize", () => {
   syncPlacementRadiiFromSlider();
   render();

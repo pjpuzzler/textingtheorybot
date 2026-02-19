@@ -4,10 +4,12 @@
 
 // --- Tuning constants (single source of truth) ---
 
-export const MIN_VOTES_FOR_BADGE_CONSENSUS = 10;
+export const MIN_VOTES_FOR_BADGE_CONSENSUS = 25;
 export const MIN_VOTES_FOR_ELO_CONSENSUS = 100;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
 export const MIN_VOTES_FOR_USER_FLAIR: number = MIN_VOTES_FOR_ELO_CONSENSUS;
+export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
+export const MAX_POST_AGE_TO_VOTE_MS: number = 24 * 60 * 60 * 1000;
 
 export const MIN_ELO = 100;
 export const MAX_ELO = 3000;
@@ -151,6 +153,7 @@ export type PostData = {
   images: PostImageData[];
   creatorId: string;
   title: string;
+  createdAtMs?: number;
   eloSide?: EloSide;
   eloOtherText?: string;
   imageUrl?: string;

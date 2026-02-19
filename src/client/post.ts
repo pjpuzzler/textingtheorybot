@@ -7,6 +7,7 @@ import {
   PICKER_CLASSIFICATIONS,
   ELO_COLOR_STOPS,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
+  MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
   MAX_ELO,
   type InitResponse,
@@ -27,6 +28,7 @@ let refreshTimer: number | null = null;
 let imageLoadToken = 0;
 let lastBadgeLayoutKey = "";
 let lastUserInteractionAt = 0;
+let suppressCanvasExpandUntil = 0;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -114,6 +116,16 @@ function currentImage() {
 
 function isOwnPost(): boolean {
   return !!postData && postData.creatorId === viewerUserId;
+}
+
+function isVotingWindowOpen(): boolean {
+  const createdAtMs = postData?.createdAtMs;
+  if (!createdAtMs) return true;
+  return Date.now() - createdAtMs <= MAX_POST_AGE_TO_VOTE_MS;
+}
+
+function canVoteOnCurrentPost(): boolean {
+  return !!postData && postData.mode === "vote" && !isOwnPost() && isVotingWindowOpen();
 }
 
 function getCanvasRect() {
@@ -211,7 +223,7 @@ async function init() {
     updateImageNav();
     loadCurrentImage();
 
-    if (postData.mode === "vote" && !isOwnPost()) {
+    if (canVoteOnCurrentPost()) {
       eloEl.style.display = "";
       setupElo();
     }
@@ -264,7 +276,7 @@ async function refreshPostState() {
       activeImageIndex = Math.max(0, postData.images.length - 1);
     }
 
-    if (postData.mode === "vote" && !isOwnPost()) {
+    if (canVoteOnCurrentPost()) {
       eloEl.style.display = "";
       updateEloDisplay();
     } else {
@@ -332,6 +344,9 @@ imgNext.addEventListener("click", () => {
 });
 
 canvasEl.addEventListener("click", (event) => {
+  if (Date.now() < suppressCanvasExpandUntil) {
+    return;
+  }
   const target = event.target as HTMLElement;
   if (
     target.closest(".badge") ||
@@ -396,7 +411,7 @@ function layoutBadges(force = false) {
       }
 
       if (pd.mode === "vote") {
-        if (!uv && !isOwnPost()) {
+        if (!uv && canVoteOnCurrentPost()) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
           el.style.setProperty("--ring-delay", `${ringPhaseDelaySeconds()}s`);
@@ -418,7 +433,7 @@ function layoutBadges(force = false) {
       }
     }
 
-    if (pd.mode === "vote" && !isOwnPost()) {
+    if (pd.mode === "vote" && canVoteOnCurrentPost()) {
       el.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -453,7 +468,7 @@ function isBookValidForVote(p: BadgePlacement): boolean {
 }
 
 function openPicker(p: BadgePlacement) {
-  if (isOwnPost()) return;
+  if (!canVoteOnCurrentPost()) return;
   markUserInteraction();
   const currentVote = userVotes[p.id];
 
@@ -594,7 +609,18 @@ function closePicker() {
   closeHint();
 }
 
-pickerBg.addEventListener("click", closePicker);
+pickerBg.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  suppressCanvasExpandUntil = Date.now() + 450;
+  closePicker();
+});
+pickerBg.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  suppressCanvasExpandUntil = Date.now() + 450;
+  closePicker();
+});
 
 async function voteBadge(p: BadgePlacement, cls: Classification) {
   if (postData && postData.creatorId === viewerUserId) {

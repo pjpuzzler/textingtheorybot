@@ -9,6 +9,8 @@ import {
   MIN_VOTES_FOR_ELO_CONSENSUS,
   MIN_VOTES_FOR_POST_FLAIR,
   MIN_VOTES_FOR_USER_FLAIR,
+  MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
+  MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
   MAX_ELO,
   MAX_VOTE_POST_IMAGES,
@@ -180,7 +182,28 @@ function getUserId(): string {
 async function getPostData(pid: string): Promise<PostData> {
   const raw = await redis.get(postKey(pid));
   if (!raw) throw new Error("Post data not found");
-  return normalizePostData(JSON.parse(raw) as PostData);
+  const normalized = normalizePostData(JSON.parse(raw) as PostData);
+  if (normalized.createdAtMs) {
+    return normalized;
+  }
+
+  try {
+    const postFullname = pid.startsWith("t3_") ? pid : `t3_${pid}`;
+    const post = await reddit.getPostById(postFullname as `t3_${string}`);
+    const createdAtMs = post?.createdAt?.getTime?.();
+    if (typeof createdAtMs === "number" && Number.isFinite(createdAtMs)) {
+      const enriched: PostData = {
+        ...normalized,
+        createdAtMs,
+      };
+      await redis.set(postKey(pid), JSON.stringify(enriched));
+      return enriched;
+    }
+  } catch {
+    // best-effort backfill for legacy posts
+  }
+
+  return normalized;
 }
 
 function normalizePostData(postData: PostData): PostData {
@@ -206,6 +229,11 @@ function getAllPlacements(postData: PostData) {
   return postData.images.flatMap((image, imageIndex) =>
     image.placements.map((placement) => ({ placement, imageIndex })),
   );
+}
+
+function isVoteWindowOpen(postData: PostData): boolean {
+  if (!postData.createdAtMs) return true;
+  return Date.now() - postData.createdAtMs <= MAX_POST_AGE_TO_VOTE_MS;
 }
 
 async function isEligibleVoter(
@@ -482,6 +510,7 @@ async function onCreatePost(
     images: uploads,
     creatorId: userId,
     title,
+    createdAtMs: Date.now(),
     eloSide: body.eloSide,
     eloOtherText: body.eloOtherText,
   };
@@ -507,6 +536,9 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
 
   if (postData.creatorId === userId) {
     throw { status: 403, message: "You can't vote on your own post" };
+  }
+  if (!isVoteWindowOpen(postData)) {
+    throw { status: 403, message: "Voting has ended for this post" };
   }
 
   const allPlacements = getAllPlacements(postData);
@@ -605,6 +637,9 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
   if (postData.creatorId === userId) {
     throw { status: 403, message: "You can't vote on your own post" };
   }
+  if (!isVoteWindowOpen(postData)) {
+    throw { status: 403, message: "Voting has ended for this post" };
+  }
 
   const elo = Math.max(MIN_ELO, Math.min(MAX_ELO, body.elo));
   const eligible = await isEligibleVoter(postData, userId);
@@ -649,8 +684,13 @@ async function updatePostFlair(
   voteCount: number,
 ): Promise<void> {
   try {
-    const flairText = `${elo} Elo (${voteCount} ${
-      voteCount === 1 ? "vote" : "votes"
+    const visibleEloText =
+      voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR
+        ? `${elo} Elo`
+        : "??? Elo";
+    const formattedVoteCount = voteCount.toLocaleString("en-US");
+    const flairText = `${visibleEloText} (${formattedVoteCount} ${
+      voteCount === 1 ? "Vote" : "Votes"
     })`;
     const bgColor = getEloColor(elo);
     const subredditName = context.subredditName;
@@ -676,7 +716,7 @@ async function updatePostFlair(
     await reddit.setPostFlair(flairPayload);
 
     // Check for [Me] user flair
-    if (voteCount >= MIN_VOTES_FOR_USER_FLAIR) {
+    if (voteCount === MIN_VOTES_FOR_USER_FLAIR) {
       await tryUpdateUserFlair(postId, elo);
     }
   } catch (err) {
@@ -703,11 +743,6 @@ async function tryUpdateUserFlair(postId: string, elo: number): Promise<void> {
     let curUserElo: number | undefined;
     if (eloUserFlairMatch?.[1]) curUserElo = parseInt(eloUserFlairMatch[1], 10);
 
-    if (
-      !curUserElo &&
-      (await voteCountForInitialFlair(postId)) !== MIN_VOTES_FOR_USER_FLAIR
-    )
-      return;
     if (curUserElo && elo <= curUserElo) return;
 
     const titleEmoji = getTitleEmoji(elo);
@@ -721,23 +756,18 @@ async function tryUpdateUserFlair(postId: string, elo: number): Promise<void> {
       textColor: "light",
     });
 
-    if (!curUserElo) {
-      const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
-      const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
-      await reddit.sendPrivateMessage({
-        subject: `Your user flair on r/${subredditName} has been updated`,
-        text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${elo} Elo. Your user flair has been automatically updated.`,
-        to: author.username,
-      });
-    }
+    const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
+    const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
+    await reddit.sendPrivateMessage({
+      subject: `Your user flair on r/${subredditName} has been updated`,
+      text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR.toLocaleString(
+        "en-US",
+      )} Elo votes with a consensus of ${elo} Elo. Your user flair has been automatically updated. You can clear or change your flair from the subreddit user flair settings at any time.`,
+      to: author.username,
+    });
   } catch (err) {
     console.error("Failed to update user flair:", err);
   }
-}
-
-async function voteCountForInitialFlair(postId: string): Promise<number> {
-  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
-  return Object.keys(allEloVoters).length;
 }
 
 // ============================

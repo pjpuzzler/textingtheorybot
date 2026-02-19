@@ -84,6 +84,15 @@ body {
   margin-top: 2px;
 }
 
+.mode-privacy-note {
+  margin-top: 2px;
+  max-width: 320px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #a9b4d2;
+  text-align: center;
+}
+
 .create-modal {
   display: none;
   position: fixed;
@@ -508,7 +517,7 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  transform: translate(10%, -10%);
+  transform: translate(50%, -50%);
   width: var(--mini-del-size, 14px);
   height: var(--mini-del-size, 14px);
   border: 1px solid rgba(255, 255, 255, 0.3);
