@@ -1,19 +1,30 @@
 {
   "private": true,
   "name": "textingtheorybot",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "license": "BSD-3-Clause",
   "type": "module",
+  "scripts": {
+    "build": "node --experimental-strip-types ./tools/build.ts --minify",
+    "deploy": "npm run build && devvit upload",
+    "dev": "devvit playtest",
+    "type-check": "tsc --build"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "dependencies": {
-    "@devvit/cli": "0.12.12",
-    "@devvit/public-api": "0.12.12",
+    "@devvit/cli": "0.12.13",
+    "@devvit/public-api": "0.12.13",
+    "@devvit/web": "0.12.13",
     "@google/genai": "latest",
     "@pinecone-database/pinecone": "latest",
-    "devvit": "0.12.12",
-    "vitest": "^3.2.4"
+    "devvit": "0.12.13"
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
-    "typescript": "5.8.3"
+    "@types/node": "22.12.0",
+    "esbuild": "0.27.2",
+    "typescript": "5.8.3",
+    "vitest": "^3.2.4"
   }
 }

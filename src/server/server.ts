@@ -1,0 +1,774 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { context, reddit, redis, media } from "@devvit/web/server";
+import type { UiResponse } from "@devvit/web/shared";
+import {
+  ApiEndpoint,
+  Classification,
+  CLASSIFICATION_WEIGHT,
+  MIN_VOTES_FOR_BADGE_CONSENSUS,
+  MIN_VOTES_FOR_ELO_CONSENSUS,
+  MIN_VOTES_FOR_POST_FLAIR,
+  MIN_VOTES_FOR_USER_FLAIR,
+  MIN_ELO,
+  MAX_ELO,
+  MAX_VOTE_POST_IMAGES,
+  MAX_ANNOTATED_POST_IMAGES,
+  interquartileMean,
+  iqmToClassification,
+  getEloColor,
+  type CreatePostRequest,
+  type CreatePostResponse,
+  type InitResponse,
+  type VoteBadgeRequest,
+  type VoteBadgeResponse,
+  type VoteEloRequest,
+  type VoteEloResponse,
+  type PostData,
+  type PostImageData,
+  type BadgeConsensus,
+} from "../shared/api.ts";
+
+const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
+const ELO_REGEX = /(\d+) Elo/;
+const ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d";
+// const ANNOTATED_FLAIR_ID = "93b0550e-0ac4-11f1-b7b0-eec33c00ce1a";
+const NO_VOTES_FLAIR_TEXT = "No votes";
+const MIN_VOTER_ACCOUNT_AGE_DAYS = 7;
+const MIN_VOTER_TOTAL_KARMA = 10;
+const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
+const ANNOTATED_PREFIX = "[Annotated] ";
+const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,20}$/;
+
+// ============================
+// Redis key helpers
+// ============================
+const postKey = (pid: string) => `tt:post:${pid}`;
+const votesKey = (pid: string, bid: string) => `tt:votes:${pid}:${bid}`;
+const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
+const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
+const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
+
+// ============================
+// Entry point
+// ============================
+export async function serverOnRequest(
+  req: IncomingMessage,
+  rsp: ServerResponse,
+): Promise<void> {
+  try {
+    await onRequest(req, rsp);
+  } catch (err) {
+    const status =
+      typeof err === "object" && err && "status" in err
+        ? Number((err as { status?: number }).status)
+        : 500;
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err && "message" in err
+        ? String((err as { message?: string }).message)
+        : String(err);
+    console.error(msg);
+    sendJSON(status, { error: msg, status }, rsp);
+  }
+}
+
+type ErrorResponse = { error: string; status: number };
+type ApiResponse =
+  | InitResponse
+  | CreatePostResponse
+  | VoteBadgeResponse
+  | VoteEloResponse;
+
+async function onRequest(
+  req: IncomingMessage,
+  rsp: ServerResponse,
+): Promise<void> {
+  const url = req.url;
+  if (!url || url === "/") {
+    sendJSON(404, { error: "not found", status: 404 }, rsp);
+    return;
+  }
+
+  const endpoint = url;
+  let body: ApiResponse | UiResponse | ErrorResponse | Record<string, unknown>;
+
+  switch (endpoint) {
+    case ApiEndpoint.Init:
+      body = await onInit();
+      break;
+    case ApiEndpoint.CreatePost:
+      body = await onCreatePost(req);
+      break;
+    case ApiEndpoint.MenuCreate:
+      const newPost = await reddit.submitCustomPost({
+        title: "New Texting Theory Post",
+        subredditName: context.subredditName ?? "TextingTheory",
+        runAs: "USER",
+        userGeneratedContent: {
+          text: "New Texting Theory Post",
+        },
+      });
+      body = { navigateTo: newPost.url } as UiResponse;
+      break;
+    case ApiEndpoint.VoteBadge:
+      body = await onVoteBadge(req);
+      break;
+    case ApiEndpoint.VoteElo:
+      body = await onVoteElo(req);
+      break;
+    case ON_APP_INSTALL_ENDPOINT:
+      body = await onAppInstall();
+      break;
+    default:
+      body = { error: "not found", status: 404 };
+      break;
+  }
+
+  const status =
+    typeof body === "object" &&
+    body !== null &&
+    "status" in body &&
+    typeof (body as { status?: unknown }).status === "number"
+      ? (body as { status: number }).status ?? 200
+      : 200;
+  sendJSON(status, body, rsp);
+}
+
+async function onAppInstall(): Promise<{
+  type: string;
+  created: boolean;
+  postUrl?: string;
+}> {
+  const subredditName = context.subredditName;
+  if (!subredditName) {
+    return { type: "app-install", created: false };
+  }
+
+  const installKey = `tt:install-post:${subredditName}`;
+  const existing = await redis.get(installKey);
+  if (existing) {
+    return { type: "app-install", created: false, postUrl: existing };
+  }
+
+  const post = await reddit.submitCustomPost({
+    subredditName,
+    title: "Create Texting Theory Post",
+    postData: { v: 1 },
+    runAs: "APP",
+  });
+
+  await redis.set(installKey, post.url);
+  return { type: "app-install", created: true, postUrl: post.url };
+}
+
+// ============================
+// Helpers
+// ============================
+function getPostId(): string {
+  const pid = context.postId;
+  if (!pid) throw new Error("No postId in context");
+  return pid;
+}
+
+function getUserId(): string {
+  const uid = context.userId;
+  if (!uid) throw new Error("No userId in context");
+  return uid;
+}
+
+async function getPostData(pid: string): Promise<PostData> {
+  const raw = await redis.get(postKey(pid));
+  if (!raw) throw new Error("Post data not found");
+  return normalizePostData(JSON.parse(raw) as PostData);
+}
+
+function normalizePostData(postData: PostData): PostData {
+  if (Array.isArray(postData.images) && postData.images.length > 0) {
+    return postData;
+  }
+
+  const fallback: PostImageData[] = [];
+  if (postData.imageUrl) {
+    fallback.push({
+      imageUrl: postData.imageUrl,
+      placements: postData.placements ?? [],
+    });
+  }
+
+  return {
+    ...postData,
+    images: fallback,
+  };
+}
+
+function getAllPlacements(postData: PostData) {
+  return postData.images.flatMap((image, imageIndex) =>
+    image.placements.map((placement) => ({ placement, imageIndex })),
+  );
+}
+
+async function isEligibleVoter(
+  postData: PostData,
+  userId: string,
+): Promise<boolean> {
+  if (userId === postData.creatorId) return false;
+
+  const user = await reddit.getUserById(userId as `t2_${string}`);
+  if (!user) return false;
+
+  const ageMs = Date.now() - user.createdAt.getTime();
+  const minAgeMs = MIN_VOTER_ACCOUNT_AGE_DAYS * 24 * 60 * 60 * 1000;
+  if (ageMs < minAgeMs) return false;
+
+  const totalKarma = (user.linkKarma || 0) + (user.commentKarma || 0);
+  if (totalKarma < MIN_VOTER_TOTAL_KARMA) return false;
+
+  const subredditName = context.subredditName;
+  if (subredditName) {
+    try {
+      const bannedUsers = await reddit
+        .getBannedUsers({
+          subredditName,
+          username: user.username,
+          limit: 1,
+          pageSize: 1,
+        })
+        .all();
+      if (
+        bannedUsers.some(
+          (bannedUser: { username: string }) =>
+            bannedUser.username === user.username,
+        )
+      ) {
+        return false;
+      }
+    } catch {
+      // best-effort banned check
+    }
+  }
+
+  return true;
+}
+
+function getTitleEmoji(elo: number): string {
+  if (elo >= 2500) return ":gm:";
+  if (elo >= 2400) return ":im:";
+  if (elo >= 2300) return ":fm:";
+  if (elo >= 2200) return ":cm:";
+  return "";
+}
+
+function getEloTargetLabel(postData: PostData): string {
+  if (postData.eloSide === "left") return "left";
+  if (postData.eloSide === "me") return "me";
+  if (postData.eloSide === "other")
+    return postData.eloOtherText?.trim() || "other";
+  return "right";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function findAsyncImagePost(
+  subredditName: string,
+  title: string,
+  imageUrl: string,
+): Promise<{ id: string; url: string } | null> {
+  const username = await reddit.getCurrentUsername();
+  const normalizedImage = imageUrl.split("?")[0] ?? imageUrl;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const posts = await reddit
+      .getNewPosts({ subredditName, limit: 25, pageSize: 25 })
+      .all();
+
+    const found = posts.find((post) => {
+      const sameTitle = post.title === title;
+      const sameUser = username ? post.authorName === username : true;
+      const postUrl = (post.url || "").split("?")[0] ?? "";
+      const sameImage = postUrl === normalizedImage;
+      return sameTitle && sameUser && sameImage;
+    });
+
+    if (found) {
+      return { id: found.id, url: found.url };
+    }
+    await sleep(1000);
+  }
+
+  return null;
+}
+
+async function readJSON<T>(req: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return JSON.parse(Buffer.concat(chunks).toString()) as T;
+}
+
+function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
+  const json = JSON.stringify(body);
+  rsp.writeHead(status, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(json),
+  });
+  rsp.end(json);
+}
+
+// ============================
+// Init
+// ============================
+async function onInit(): Promise<InitResponse> {
+  const postId = getPostId();
+  const userId = getUserId();
+  const username = (await reddit.getCurrentUsername()) ?? "unknown";
+
+  let postData: PostData | null = null;
+  try {
+    postData = await getPostData(postId);
+  } catch {
+    /* no post data */
+  }
+
+  // Badge consensus
+  const consensus: Record<string, BadgeConsensus> = {};
+  const userVotes: Record<string, Classification> = {};
+
+  if (postData) {
+    const uvRaw = await redis.hGetAll(userVotesKey(postId, userId));
+    for (const [bid, cls] of Object.entries(uvRaw)) {
+      userVotes[bid] = cls as Classification;
+    }
+
+    for (const { placement } of getAllPlacements(postData)) {
+      const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+      consensus[placement.id] = computeBadgeConsensus(allVotes);
+    }
+  }
+
+  // ELO
+  let userElo: number | null = null;
+  let consensusElo: number | null = null;
+  let eloVoteCount = 0;
+
+  const userEloRaw = await redis.get(userEloKey(postId, userId));
+  if (userEloRaw) userElo = Number(userEloRaw);
+
+  const allEloRaw = await redis.get(eloVotesKey(postId));
+  if (allEloRaw) {
+    const eloArr = JSON.parse(allEloRaw) as number[];
+    eloVoteCount = eloArr.length;
+    if (eloArr.length >= MIN_VOTES_FOR_ELO_CONSENSUS) {
+      consensusElo = Math.round(interquartileMean(eloArr));
+    }
+  }
+
+  return {
+    type: "init",
+    postId,
+    username,
+    userId,
+    postData,
+    consensus,
+    userVotes,
+    userElo,
+    consensusElo,
+    eloVoteCount,
+  };
+}
+
+// ============================
+// Create Post
+// ============================
+async function onCreatePost(
+  req: IncomingMessage,
+): Promise<CreatePostResponse | UiResponse> {
+  const userId = getUserId();
+  const body = await readJSON<CreatePostRequest>(req);
+
+  if (body.mode === "vote" && body.eloSide === "other") {
+    const other = (body.eloOtherText ?? "").trim();
+    if (!OTHER_ELO_LABEL_REGEX.test(other)) {
+      throw new Error("Other vote target must be letters only (max 20)");
+    }
+    body.eloOtherText = other;
+  }
+
+  if (!body.images?.length) throw new Error("At least one image is required");
+  const maxImages =
+    body.mode === "annotated"
+      ? MAX_ANNOTATED_POST_IMAGES
+      : MAX_VOTE_POST_IMAGES;
+  if (body.images.length > maxImages)
+    throw new Error(`Max ${maxImages} images`);
+
+  const uploads: PostImageData[] = [];
+  for (const image of body.images) {
+    const dataUrl = `data:${image.imageMimeType};base64,${image.imageData}`;
+    const upload = await media.upload({ url: dataUrl, type: "image" });
+    uploads.push({
+      imageUrl: upload.mediaUrl,
+      imageWidth: image.imageWidth,
+      imageHeight: image.imageHeight,
+      placements: image.placements,
+    });
+  }
+
+  const baseTitle = body.title || "Texting Theory";
+  const title =
+    body.mode === "annotated" && !baseTitle.startsWith(ANNOTATED_PREFIX)
+      ? `${ANNOTATED_PREFIX}${baseTitle}`
+      : baseTitle;
+  const subredditName = context.subredditName ?? "TextingTheory";
+  let postId = "";
+  let postUrl = "";
+
+  if (body.mode === "annotated") {
+    try {
+      const post = await reddit.submitPost({
+        subredditName,
+        title,
+        kind: "image",
+        runAs: "USER",
+        flairId: ANNOTATED_FLAIR_ID,
+        imageUrls: [uploads[0]!.imageUrl],
+      });
+      postId = post.id;
+      postUrl = post.url;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes("being created asynchronously")) {
+        throw err;
+      }
+
+      const found = await findAsyncImagePost(
+        subredditName,
+        title,
+        uploads[0]!.imageUrl,
+      );
+      if (!found) {
+        postId = `pending-${Date.now()}`;
+        postUrl = `https://www.reddit.com/r/${subredditName}/new/`;
+      } else {
+        postId = found.id;
+        postUrl = found.url;
+      }
+    }
+  } else {
+    const post = await reddit.submitCustomPost({
+      title,
+      postData: { v: 1 },
+      runAs: "USER",
+      userGeneratedContent: {
+        text: title,
+        imageUrls: uploads.map((upload) => upload.imageUrl),
+      },
+    });
+    postId = post.id;
+    postUrl = post.url;
+
+    const postFullname = postId.startsWith("t3_") ? postId : `t3_${postId}`;
+    await reddit.setPostFlair({
+      subredditName,
+      postId: postFullname as `t3_${string}`,
+      text: NO_VOTES_FLAIR_TEXT,
+      textColor: "light",
+    });
+  }
+
+  const pd: PostData = {
+    mode: body.mode,
+    images: uploads,
+    creatorId: userId,
+    title,
+    eloSide: body.eloSide,
+    eloOtherText: body.eloOtherText,
+  };
+  if (body.mode !== "annotated") {
+    await redis.set(postKey(postId), JSON.stringify(pd));
+  }
+
+  return {
+    type: "create-post",
+    postId,
+    postUrl,
+  };
+}
+
+// ============================
+// Vote Badge
+// ============================
+async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
+  const postId = getPostId();
+  const userId = getUserId();
+  const body = await readJSON<VoteBadgeRequest>(req);
+  const postData = await getPostData(postId);
+
+  if (postData.creatorId === userId) {
+    throw { status: 403, message: "You can't vote on your own post" };
+  }
+
+  const allPlacements = getAllPlacements(postData);
+  const found = allPlacements.find(
+    ({ placement }) => placement.id === body.badgeId,
+  );
+  if (!found) throw new Error("Badge not found");
+
+  const eligible = await isEligibleVoter(postData, userId);
+
+  // Always store local user vote for UX, only count eligible votes toward consensus
+  await redis.hSet(userVotesKey(postId, userId), {
+    [body.badgeId]: body.classification,
+  });
+  if (eligible) {
+    await redis.hSet(votesKey(postId, body.badgeId), {
+      [userId]: body.classification,
+    });
+  }
+
+  const invalidatedBadgeIds = await invalidateBrokenBookVotes(
+    postId,
+    userId,
+    postData,
+    eligible,
+  );
+
+  // Recompute all consensus
+  const allConsensus: Record<string, BadgeConsensus> = {};
+  for (const { placement: p } of allPlacements) {
+    const allVotes = await redis.hGetAll(votesKey(postId, p.id));
+    allConsensus[p.id] = computeBadgeConsensus(allVotes);
+  }
+
+  return {
+    type: "vote-badge",
+    consensus: allConsensus[body.badgeId]!,
+    allConsensus,
+    counted: eligible,
+    invalidatedBadgeIds,
+  };
+}
+
+async function invalidateBrokenBookVotes(
+  postId: string,
+  userId: string,
+  postData: PostData,
+  eligible: boolean,
+): Promise<string[]> {
+  const currentUserVotes = await redis.hGetAll(userVotesKey(postId, userId));
+  const invalidatedBadgeIds: string[] = [];
+
+  const placements = postData.images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  let canContinueBook = true;
+  for (const placement of placements) {
+    const vote = currentUserVotes[placement.id] as Classification | undefined;
+    if (!vote) {
+      canContinueBook = false;
+      continue;
+    }
+
+    if (vote === Classification.BOOK) {
+      if (!canContinueBook) {
+        invalidatedBadgeIds.push(placement.id);
+        delete currentUserVotes[placement.id];
+      }
+      continue;
+    }
+
+    canContinueBook = false;
+  }
+
+  for (const badgeId of invalidatedBadgeIds) {
+    await redis.hDel(userVotesKey(postId, userId), [badgeId]);
+    if (eligible) {
+      await redis.hDel(votesKey(postId, badgeId), [userId]);
+    }
+  }
+
+  return invalidatedBadgeIds;
+}
+
+// ============================
+// Vote ELO
+// ============================
+async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
+  const postId = getPostId();
+  const userId = getUserId();
+  const body = await readJSON<VoteEloRequest>(req);
+  const postData = await getPostData(postId);
+
+  if (postData.creatorId === userId) {
+    throw { status: 403, message: "You can't vote on your own post" };
+  }
+
+  const elo = Math.max(MIN_ELO, Math.min(MAX_ELO, body.elo));
+  const eligible = await isEligibleVoter(postData, userId);
+
+  // Always store local user ELO for UX indicator
+  await redis.set(userEloKey(postId, userId), String(elo));
+
+  // Only eligible votes are counted
+  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
+  if (eligible) {
+    allEloVoters[userId] = String(elo);
+    await redis.hSet(`tt:elovoters:${postId}`, { [userId]: String(elo) });
+  }
+
+  const eloArr = Object.values(allEloVoters).map(Number);
+  await redis.set(eloVotesKey(postId), JSON.stringify(eloArr));
+
+  const voteCount = eloArr.length;
+  const consensusElo =
+    voteCount > 0 ? Math.round(interquartileMean(eloArr)) : elo;
+
+  // Update post flair
+  if (voteCount >= MIN_VOTES_FOR_POST_FLAIR) {
+    await updatePostFlair(postId, consensusElo, voteCount);
+  }
+
+  return {
+    type: "vote-elo",
+    consensusElo,
+    voteCount,
+    counted: eligible,
+    targetLabel: getEloTargetLabel(postData),
+  };
+}
+
+// ============================
+// Flair
+// ============================
+async function updatePostFlair(
+  postId: string,
+  elo: number,
+  voteCount: number,
+): Promise<void> {
+  try {
+    const flairText = `${elo} Elo (${voteCount} ${
+      voteCount === 1 ? "vote" : "votes"
+    })`;
+    const bgColor = getEloColor(elo);
+    const subredditName = context.subredditName;
+    if (!subredditName) return;
+
+    const postFullname = postId.startsWith("t3_") ? postId : `t3_${postId}`;
+
+    const flairPayload: {
+      subredditName: string;
+      postId: `t3_${string}`;
+      text: string;
+      textColor: "light";
+      backgroundColor?: string;
+    } = {
+      subredditName,
+      postId: postFullname as `t3_${string}`,
+      text: flairText,
+      textColor: "light",
+    };
+    if (voteCount >= MIN_VOTES_FOR_USER_FLAIR) {
+      flairPayload.backgroundColor = bgColor;
+    }
+    await reddit.setPostFlair(flairPayload);
+
+    // Check for [Me] user flair
+    if (voteCount >= MIN_VOTES_FOR_USER_FLAIR) {
+      await tryUpdateUserFlair(postId, elo);
+    }
+  } catch (err) {
+    console.error("Failed to update flair:", err);
+  }
+}
+
+async function tryUpdateUserFlair(postId: string, elo: number): Promise<void> {
+  try {
+    const postData = await getPostData(postId);
+    if (!TITLE_ME_VOTE_REGEX.test(postData.title)) return;
+
+    const subredditName = context.subredditName;
+    if (!subredditName) return;
+
+    const author = await reddit.getUserById(
+      postData.creatorId as `t2_${string}`,
+    );
+    if (!author) return;
+
+    const postAuthorFlair = await author.getUserFlairBySubreddit(subredditName);
+    const eloUserFlairMatch = postAuthorFlair?.flairText?.match(ELO_REGEX);
+    if (postAuthorFlair?.flairText && !eloUserFlairMatch) return;
+    let curUserElo: number | undefined;
+    if (eloUserFlairMatch?.[1]) curUserElo = parseInt(eloUserFlairMatch[1], 10);
+
+    if (
+      !curUserElo &&
+      (await voteCountForInitialFlair(postId)) !== MIN_VOTES_FOR_USER_FLAIR
+    )
+      return;
+    if (curUserElo && elo <= curUserElo) return;
+
+    const titleEmoji = getTitleEmoji(elo);
+    const flairText = `${titleEmoji}${elo} Elo`;
+
+    await reddit.setUserFlair({
+      subredditName,
+      username: author.username,
+      text: flairText,
+      backgroundColor: getEloColor(elo),
+      textColor: "light",
+    });
+
+    if (!curUserElo) {
+      const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
+      const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
+      await reddit.sendPrivateMessage({
+        subject: `Your user flair on r/${subredditName} has been updated`,
+        text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR} Elo votes with a consensus of ${elo} Elo. Your user flair has been automatically updated.`,
+        to: author.username,
+      });
+    }
+  } catch (err) {
+    console.error("Failed to update user flair:", err);
+  }
+}
+
+async function voteCountForInitialFlair(postId: string): Promise<number> {
+  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
+  return Object.keys(allEloVoters).length;
+}
+
+// ============================
+// Consensus computation
+// ============================
+function computeBadgeConsensus(
+  allVotes: Record<string, string>,
+): BadgeConsensus {
+  const entries = Object.entries(allVotes);
+  const totalVotes = entries.length;
+
+  if (totalVotes === 0) {
+    return { classification: null, totalVotes: 0, voteCounts: {}, iqm: 0 };
+  }
+
+  const voteCounts: Partial<Record<Classification, number>> = {};
+  const weights: number[] = [];
+
+  for (const [, cls] of entries) {
+    const c = cls as Classification;
+    voteCounts[c] = (voteCounts[c] ?? 0) + 1;
+    const w = CLASSIFICATION_WEIGHT[c] ?? 0;
+    weights.push(w);
+  }
+
+  const iqm = interquartileMean(weights);
+
+  let classification: Classification | null = null;
+  if (totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS) {
+    classification = iqmToClassification(iqm, voteCounts, totalVotes);
+  }
+
+  return { classification, totalVotes, voteCounts, iqm };
+}

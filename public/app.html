@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <link rel="stylesheet" type="text/css" href="app.css" />
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0"
+    />
+    <title>Creating Texting Theory Post</title>
+  </head>
+
+  <body>
+    <!-- Main Screen (Mode Selection) -->
+    <div class="screen-mode" id="screen-mode">
+      <img src="/assets/logo.png" alt="Texting Theory" class="mode-logo" />
+
+      <div class="mode-card" id="btn-vote">
+        <div class="mode-icon-wrap">
+          <div
+            class="mode-icon"
+            style="background-image: url(/assets/badges/interesting.png)"
+          ></div>
+        </div>
+        <div>
+          <div class="mode-name">Community Vote</div>
+          <div class="mode-sub">Let others judge me</div>
+          <div class="mode-hint">Max 3 images</div>
+        </div>
+      </div>
+
+      <div class="mode-card" id="btn-annotate">
+        <div class="mode-icon-wrap">
+          <div
+            class="mode-icon"
+            style="background-image: url(/assets/badges/book.png)"
+          ></div>
+        </div>
+        <div>
+          <div class="mode-name">Annotate Myself</div>
+          <div class="mode-sub">Place your own badges</div>
+          <div class="mode-hint">Max 1 image</div>
+        </div>
+      </div>
+
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        id="file-input"
+        class="hidden-input"
+      />
+    </div>
+
+    <!-- Creation Editor -->
+    <div class="create-modal" id="create-modal">
+      <div class="cm-content">
+        <div class="cm-canvas-wrap" id="cm-canvas-wrap">
+          <img class="cm-img" id="cm-img" alt="" />
+          <div class="cm-badges" id="cm-badges"></div>
+          <div class="page-chip" id="cm-page-chip" style="display: none">
+            1/1
+          </div>
+          <div class="image-nav" id="cm-image-nav" style="display: none">
+            <button class="img-nav-btn" id="cm-img-prev">‹</button>
+            <div class="img-dots" id="cm-img-dots"></div>
+            <button class="img-nav-btn" id="cm-img-next">›</button>
+          </div>
+          <div class="hint" id="hint">
+            Tap to place a badge for every single message.
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="cm-toolbar">
+          <div class="cm-row">
+            <input
+              type="range"
+              class="cm-slider"
+              id="cm-size"
+              min="4"
+              max="9"
+              step="0.1"
+              value="6"
+            />
+            <button class="cm-btn-post" id="cm-btn-next">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="details-modal" id="details-modal">
+      <div class="details-bg" id="details-bg"></div>
+      <div class="details-card">
+        <div class="cm-row details-top-row">
+          <input
+            type="text"
+            class="cm-title"
+            id="cm-title"
+            placeholder="Post title (required)"
+          />
+          <button class="cm-btn-post" id="cm-btn-post">Post</button>
+        </div>
+        <div class="cm-row" id="side-row">
+          <div class="cm-row" id="vote-target-controls">
+            <span class="cm-label">Vote target</span>
+            <div class="side-btns">
+              <button class="side-btn" id="side-left" data-side="left">
+                Left
+              </button>
+              <button class="side-btn active" id="side-right" data-side="right">
+                Right
+              </button>
+              <button class="side-btn" id="side-other" data-side="other">
+                Other
+              </button>
+            </div>
+            <label class="me-check" id="me-check-label">
+              <input type="checkbox" id="me-check" checked />
+              <span class="me-check-text">Right is me</span>
+            </label>
+          </div>
+        </div>
+        <div class="cm-row" id="other-row" style="display: none">
+          <input
+            type="text"
+            class="cm-other"
+            id="cm-other"
+            maxlength="20"
+            placeholder="If other, who?"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="warn-modal" id="single-badge-modal">
+      <div class="warn-bg" id="single-badge-bg"></div>
+      <div class="warn-card">
+        <div class="warn-title">Only 1 badge placed</div>
+        <div class="warn-text">
+          You currently have only one badge. Please make sure you've labeled all
+          relevant messages before posting.
+        </div>
+        <div class="warn-actions">
+          <button class="warn-btn warn-btn-secondary" id="single-badge-cancel">
+            Go Back
+          </button>
+          <button class="warn-btn warn-btn-primary" id="single-badge-continue">
+            Continue
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Badge Picker Sheet -->
+    <div class="picker-modal" id="picker-modal">
+      <div class="picker-bg" id="picker-bg"></div>
+      <div class="picker-sheet">
+        <div class="picker-handle"></div>
+        <div class="picker-title" id="picker-title">
+          Vote for Classification
+        </div>
+        <div class="picker-body" id="picker-body"></div>
+      </div>
+    </div>
+
+    <!-- Spinner Overlay -->
+    <div class="overlay-submit" id="overlay-submit" style="display: none">
+      <div class="spinner"></div>
+      <p id="overlay-submit-text">Creating post…</p>
+    </div>
+
+    <script type="module" src="app.js" defer></script>
+  </body>
+</html>

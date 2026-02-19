@@ -1,11 +1,37 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "textingtheorybot",
-  "blocks": {
-    "entry": "src/main.tsx",
-    "triggers": ["onPostCreate", "onPostDelete", "onCommentCreate"]
+  "permissions": {
+    "media": true,
+    "reddit": {
+      "enable": true,
+      "asUser": ["SUBMIT_POST"]
+    }
+  },
+  "post": {
+    "dir": "public",
+    "entrypoints": {
+      "default": {
+        "inline": true,
+        "entry": "post.html"
+      },
+      "create": {
+        "entry": "app.html"
+      }
+    }
+  },
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.js"
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/on-app-install"
+  },
+  "scripts": {
+    "dev": "node --experimental-strip-types ./tools/build.ts --watch",
+    "build": "node --experimental-strip-types ./tools/build.ts --minify"
   },
   "marketingAssets": {
-    "icon": "assets/textfish.png"
+    "icon": "public/assets/logo.png"
   }
 }

@@ -1,0 +1,35 @@
+{
+    "$schema": "https://json.schemastore.org/tsconfig.json",
+    "compilerOptions": {
+        "composite": true,
+        "allowImportingTsExtensions": true,
+        "erasableSyntaxOnly": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "forceConsistentCasingInFileNames": true,
+        "noImplicitOverride": true,
+        "noUncheckedIndexedAccess": true,
+        "noUncheckedSideEffectImports": true,
+        "noUnusedLocals": true,
+        "resolveJsonModule": true,
+        "strict": true,
+        "lib": [
+            "ES2023"
+        ],
+        "types": [],
+        "isolatedDeclarations": true,
+        "isolatedModules": true,
+        "esModuleInterop": true,
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "rewriteRelativeImportExtensions": true,
+        "outDir": "../dist",
+        "rootDir": "..",
+        "skipLibCheck": true,
+        "skipDefaultLibCheck": true,
+        "sourceMap": true,
+        "declarationMap": true,
+        "target": "ES2023",
+        "verbatimModuleSyntax": true
+    }
+}
