@@ -234,7 +234,7 @@ body {
     transparent calc(100% - var(--ring-width, 2px)),
     #000 calc(100% - var(--ring-width, 2px))
   );
-  animation: ring-spin 6s linear infinite;
+  animation: ring-spin 9s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;

@@ -420,10 +420,7 @@ function layoutBadges(force = false) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
           el.style.setProperty("--ring-delay", `${ringPhaseDelaySeconds()}s`);
-          el.style.setProperty(
-            "--ring-width",
-            `${Math.max(1.25, sizePx * 0.085)}px`,
-          );
+          el.style.setProperty("--ring-width", `2px`);
         }
 
         if (uv && !isOwnPost()) {
