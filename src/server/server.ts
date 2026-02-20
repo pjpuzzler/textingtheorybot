@@ -39,7 +39,7 @@ const MIN_VOTER_ACCOUNT_AGE_DAYS = 7;
 const MIN_VOTER_TOTAL_KARMA = 10;
 const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
 const ANNOTATED_PREFIX = "[Annotated] ";
-const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,20}$/;
+const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 
 // ============================
 // Redis key helpers
@@ -307,7 +307,7 @@ async function findAsyncImagePost(
   const username = await reddit.getCurrentUsername();
   const normalizedImage = imageUrl.split("?")[0] ?? imageUrl;
 
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     const posts = await reddit
       .getNewPosts({ subredditName, limit: 25, pageSize: 25 })
       .all();
@@ -323,7 +323,7 @@ async function findAsyncImagePost(
     if (found) {
       return { id: found.id, url: found.url };
     }
-    await sleep(1000);
+    await sleep(200);
   }
 
   return null;
@@ -418,7 +418,7 @@ async function onCreatePost(
   if (body.mode === "vote" && body.eloSide === "other") {
     const other = (body.eloOtherText ?? "").trim();
     if (!OTHER_ELO_LABEL_REGEX.test(other)) {
-      throw new Error("Other vote target must be letters only (max 20)");
+      throw new Error("Other vote target must be letters only (max 16)");
     }
     body.eloOtherText = other;
   }

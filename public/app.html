@@ -43,12 +43,6 @@
         </div>
       </div>
 
-      <div class="mode-privacy-note">
-        Before posting, censor names/photos/identifying info. If on the app, you
-        can use Reddit's create menu to edit your image, then save it to your
-        device before uploading here.
-      </div>
-
       <input
         type="file"
         accept="image/*"
@@ -63,7 +57,15 @@
       <div class="cm-content">
         <div class="cm-canvas-wrap" id="cm-canvas-wrap">
           <img class="cm-img" id="cm-img" alt="" />
+          <canvas class="cm-redact-layer" id="cm-redact-layer"></canvas>
           <div class="cm-badges" id="cm-badges"></div>
+          <button
+            class="cm-marker-toggle"
+            id="cm-marker-toggle"
+            aria-label="Enable redaction marker"
+          >
+            ✎
+          </button>
           <div class="page-chip" id="cm-page-chip" style="display: none">
             1/1
           </div>
@@ -73,7 +75,8 @@
             <button class="img-nav-btn" id="cm-img-next">›</button>
           </div>
           <div class="hint" id="hint">
-            Tap to place a badge for every single message.
+            Tap to place a badge by every relevant message.<br />Don't cover
+            anything important.
           </div>
         </div>
 
@@ -132,7 +135,7 @@
             type="text"
             class="cm-other"
             id="cm-other"
-            maxlength="20"
+            maxlength="16"
             placeholder="If other, who?"
           />
         </div>

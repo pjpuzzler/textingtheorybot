@@ -14,6 +14,16 @@ import {
   type EloSide,
 } from "../shared/api.ts";
 
+type RedactionPoint = {
+  x: number;
+  y: number;
+};
+
+type RedactionStroke = {
+  points: RedactionPoint[];
+  widthPct: number;
+};
+
 type EditorImage = {
   dataUrl: string;
   base64: string;
@@ -21,12 +31,14 @@ type EditorImage = {
   width: number;
   height: number;
   placements: BadgePlacement[];
+  redactions: RedactionStroke[];
 };
 
 const MAX_IMAGE_DIM = 2048;
 const VOTE_MIN_RADIUS = 4;
 const ANNOTATED_MIN_RADIUS = 2;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
+const REDACTION_STROKE_WIDTH_PCT = 1.25;
 
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
@@ -44,6 +56,9 @@ let pointerState: {
 let images: EditorImage[] = [];
 let activeImageIndex = 0;
 let isSubmitting = false;
+let markerModeEnabled = false;
+let drawingPointerId: number | null = null;
+let activeStroke: RedactionStroke | null = null;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -55,8 +70,10 @@ const fileInput = $("file-input") as HTMLInputElement;
 const createModal = $("create-modal") as HTMLDivElement;
 const cmTitle = $("cm-title") as HTMLInputElement;
 const cmImg = $("cm-img") as HTMLImageElement;
+const cmRedactLayer = $("cm-redact-layer") as HTMLCanvasElement;
 const cmCanvasWrap = $("cm-canvas-wrap") as HTMLDivElement;
 const cmBadges = $("cm-badges") as HTMLDivElement;
+const cmMarkerToggle = $("cm-marker-toggle") as HTMLButtonElement;
 const hintEl = $("hint") as HTMLDivElement;
 const cmPageChip = $("cm-page-chip") as HTMLDivElement;
 const cmImageNav = $("cm-image-nav") as HTMLDivElement;
@@ -92,11 +109,12 @@ const pickerTitle = $("picker-title") as HTMLDivElement;
 const pickerBody = $("picker-body") as HTMLDivElement;
 
 let pendingNewAnnotation: BadgePlacement | null = null;
+let suppressEditorPickerUntil = 0;
 
-const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,20}$/;
+const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 
 function sanitizeOtherEloLabel(value: string): string {
-  return value.replace(/[^A-Za-z]/g, "").slice(0, 20);
+  return value.replace(/[^A-Za-z]/g, "").slice(0, 16);
 }
 
 globalRadius = Number(cmSize.value) || globalRadius;
@@ -203,6 +221,7 @@ fileInput.addEventListener("change", async () => {
       width: downscaled.width,
       height: downscaled.height,
       placements: [],
+      redactions: [],
     });
   }
 
@@ -219,6 +238,10 @@ function getActiveImage(): EditorImage {
 
 function getActivePlacements(): BadgePlacement[] {
   return getActiveImage().placements;
+}
+
+function getActiveRedactions(): RedactionStroke[] {
+  return getActiveImage().redactions;
 }
 
 function getTotalPlacements(): number {
@@ -277,16 +300,26 @@ otherInput.addEventListener("input", () => {
 function openEditor() {
   applySliderBoundsForMode();
   globalRadius = Number(cmSize.value) || globalRadius;
+  markerModeEnabled = false;
+  updateMarkerToggleUI();
   document.title = "Creating Texting Theory Post";
   screenMode.style.display = "none";
   createModal.classList.add("open");
-  hintEl.textContent =
-    mode === "annotated"
-      ? "Tap to place a badge."
-      : "Tap to place a badge next to every single message.";
+  //   hintEl.textContent =
+  //     mode === "annotated"
+  //       ? "Tap to place a badge by every relevant message. Don't cover anything important."
+  //       : "Tap to place a badge by every relevant message. Don't cover anything important.";
   syncPlacementRadiiFromSlider();
   updateSideUI();
   loadActiveImage();
+}
+
+function updateMarkerToggleUI(): void {
+  cmMarkerToggle.classList.toggle("active", markerModeEnabled);
+  cmMarkerToggle.setAttribute(
+    "aria-label",
+    markerModeEnabled ? "Disable redaction marker" : "Enable redaction marker",
+  );
 }
 
 function updateImageNav() {
@@ -397,6 +430,7 @@ function canvasRect() {
 
 function render() {
   const r = canvasRect();
+  renderRedactions(r);
   cmBadges.style.left = `${r.x}px`;
   cmBadges.style.top = `${r.y}px`;
   cmBadges.style.width = `${r.w}px`;
@@ -466,11 +500,16 @@ function render() {
       onBadgePointerDown(event, placement),
     );
     el.addEventListener("click", (event) => {
+      if (markerModeEnabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       event.stopPropagation();
       const wasSelected = selectedId === placement.id;
       selectBadge(placement.id);
       if (mode === "annotated") {
-        if (wasSelected) {
+        if (wasSelected && Date.now() >= suppressEditorPickerUntil) {
           openClassPicker(placement, false);
         }
       }
@@ -506,6 +545,8 @@ function clampPlacementCenter(
 }
 
 cmCanvasWrap.addEventListener("click", (event) => {
+  if (markerModeEnabled) return;
+  if (Date.now() < suppressEditorPickerUntil) return;
   const target = event.target as HTMLElement;
   if (target.closest(".ed-badge")) return;
   if (target.closest(".image-nav")) return;
@@ -553,6 +594,7 @@ cmCanvasWrap.addEventListener("click", (event) => {
 });
 
 function onBadgePointerDown(event: PointerEvent, placement: BadgePlacement) {
+  if (markerModeEnabled) return;
   event.preventDefault();
   event.stopPropagation();
   pointerState = {
@@ -602,6 +644,153 @@ function onPointerUp(event: PointerEvent) {
   pointerState = null;
   window.removeEventListener("pointermove", onPointerMove);
 }
+
+function toImagePercentPoint(event: PointerEvent): RedactionPoint | null {
+  const r = canvasRect();
+  const rect = cmCanvasWrap.getBoundingClientRect();
+  let px = event.clientX - rect.left;
+  let py = event.clientY - rect.top;
+
+  if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) return null;
+  px = Math.max(r.x, Math.min(px, r.x + r.w));
+  py = Math.max(r.y, Math.min(py, r.y + r.h));
+  return {
+    x: ((px - r.x) / r.w) * 100,
+    y: ((py - r.y) / r.h) * 100,
+  };
+}
+
+function renderRedactions(rect: ReturnType<typeof canvasRect>): void {
+  cmRedactLayer.style.left = `${rect.x}px`;
+  cmRedactLayer.style.top = `${rect.y}px`;
+  cmRedactLayer.style.width = `${rect.w}px`;
+  cmRedactLayer.style.height = `${rect.h}px`;
+
+  const drawW = Math.max(1, Math.round(rect.w));
+  const drawH = Math.max(1, Math.round(rect.h));
+  if (cmRedactLayer.width !== drawW) cmRedactLayer.width = drawW;
+  if (cmRedactLayer.height !== drawH) cmRedactLayer.height = drawH;
+
+  const ctx = cmRedactLayer.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, cmRedactLayer.width, cmRedactLayer.height);
+  drawRedactionsOnContext(
+    ctx,
+    getActiveRedactions(),
+    cmRedactLayer.width,
+    cmRedactLayer.height,
+  );
+}
+
+function drawRedactionsOnContext(
+  ctx: CanvasRenderingContext2D,
+  redactions: RedactionStroke[],
+  width: number,
+  height: number,
+): void {
+  const scaleBase = Math.max(width, height);
+  ctx.strokeStyle = "#0b0b0b";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  for (const stroke of redactions) {
+    if (!stroke.points.length) continue;
+    ctx.lineWidth =
+      ((stroke.widthPct || REDACTION_STROKE_WIDTH_PCT) / 100) * scaleBase;
+    ctx.beginPath();
+    const first = stroke.points[0]!;
+    ctx.moveTo((first.x / 100) * width, (first.y / 100) * height);
+    for (let index = 1; index < stroke.points.length; index++) {
+      const point = stroke.points[index]!;
+      ctx.lineTo((point.x / 100) * width, (point.y / 100) * height);
+    }
+    if (stroke.points.length === 1) {
+      const point = stroke.points[0]!;
+      const radius = Math.max(1, ctx.lineWidth / 2);
+      ctx.moveTo((point.x / 100) * width + radius, (point.y / 100) * height);
+      ctx.arc(
+        (point.x / 100) * width,
+        (point.y / 100) * height,
+        radius,
+        0,
+        Math.PI * 2,
+      );
+    }
+    ctx.stroke();
+  }
+}
+
+function onMarkerPointerMove(event: PointerEvent): void {
+  if (
+    !markerModeEnabled ||
+    drawingPointerId !== event.pointerId ||
+    !activeStroke
+  )
+    return;
+  event.preventDefault();
+  const point = toImagePercentPoint(event);
+  if (!point) return;
+  const last = activeStroke.points[activeStroke.points.length - 1];
+  if (
+    last &&
+    Math.abs(last.x - point.x) < 0.08 &&
+    Math.abs(last.y - point.y) < 0.08
+  )
+    return;
+  activeStroke.points.push(point);
+  render();
+}
+
+function onMarkerPointerUp(event: PointerEvent): void {
+  if (drawingPointerId !== event.pointerId) return;
+  drawingPointerId = null;
+  activeStroke = null;
+  window.removeEventListener("pointermove", onMarkerPointerMove);
+  window.removeEventListener("pointerup", onMarkerPointerUp);
+  window.removeEventListener("pointercancel", onMarkerPointerUp);
+}
+
+cmCanvasWrap.addEventListener("pointerdown", (event) => {
+  if (!markerModeEnabled) return;
+  const target = event.target as HTMLElement;
+  if (target.closest("#cm-marker-toggle")) return;
+  if (target.closest(".image-nav")) return;
+
+  const point = toImagePercentPoint(event);
+  if (!point) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  hintEl.classList.add("hidden");
+  selectedId = null;
+
+  const stroke: RedactionStroke = {
+    points: [point],
+    widthPct: REDACTION_STROKE_WIDTH_PCT,
+  };
+  getActiveRedactions().push(stroke);
+  activeStroke = stroke;
+  drawingPointerId = event.pointerId;
+
+  window.addEventListener("pointermove", onMarkerPointerMove);
+  window.addEventListener("pointerup", onMarkerPointerUp);
+  window.addEventListener("pointercancel", onMarkerPointerUp);
+  render();
+});
+
+cmMarkerToggle.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  markerModeEnabled = !markerModeEnabled;
+  selectedId = null;
+  updateMarkerToggleUI();
+  render();
+});
+
+cmMarkerToggle.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+});
 
 cmSize.addEventListener("input", () => {
   globalRadius = Number(cmSize.value);
@@ -685,7 +874,7 @@ cmPost.addEventListener("click", async () => {
         return;
       }
       if (!OTHER_ELO_LABEL_REGEX.test(txt)) {
-        alert("Other target must be letters only, max 20 characters.");
+        alert("Other target must be letters only, max 16 characters.");
         otherInput.focus();
         return;
       }
@@ -708,13 +897,7 @@ cmPost.addEventListener("click", async () => {
     const payloadImages =
       mode === "annotated"
         ? [await flattenAnnotatedImage(images[0]!)]
-        : images.map((img) => ({
-            imageData: img.base64,
-            imageMimeType: img.mime,
-            imageWidth: img.width,
-            imageHeight: img.height,
-            placements: img.placements,
-          }));
+        : await Promise.all(images.map((img) => flattenVoteImage(img)));
 
     const body: CreatePostRequest = {
       title,
@@ -737,8 +920,9 @@ cmPost.addEventListener("click", async () => {
         mode === "annotated" &&
         /asynchronously|could not be resolved yet/i.test(message)
       ) {
-        submitText.textContent = "Post created successfully";
-        await new Promise((resolve) => setTimeout(resolve, 650));
+        submitText.textContent =
+          "Post submitted. Reddit is still finalizing it…";
+        await new Promise((resolve) => setTimeout(resolve, 120));
         detailsModal.classList.remove("open");
         createModal.classList.remove("open");
         screenMode.style.display = "flex";
@@ -757,8 +941,14 @@ cmPost.addEventListener("click", async () => {
 
     const data = (await res.json()) as CreatePostResponse;
     if (data.postUrl) {
-      submitText.textContent = "Post created successfully";
-      await new Promise((resolve) => setTimeout(resolve, 650));
+      const unresolvedAnnotated =
+        mode === "annotated" && data.postId.startsWith("pending-");
+      submitText.textContent = unresolvedAnnotated
+        ? "Post submitted. Reddit is still finalizing it…"
+        : "Post created successfully";
+      await new Promise((resolve) =>
+        setTimeout(resolve, unresolvedAnnotated ? 120 : 250),
+      );
       detailsModal.classList.remove("open");
       createModal.classList.remove("open");
       screenMode.style.display = "flex";
@@ -956,9 +1146,16 @@ function closePicker() {
   closeHint();
 }
 
-pickerBg.addEventListener("click", closePicker);
 pickerBg.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  event.stopPropagation();
+  suppressEditorPickerUntil = Date.now() + 450;
+  closePicker();
+});
+pickerBg.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  suppressEditorPickerUntil = Date.now() + 450;
   closePicker();
 });
 window.addEventListener("resize", () => {
@@ -1047,6 +1244,7 @@ async function flattenAnnotatedImage(image: EditorImage): Promise<{
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+  drawRedactionsOnContext(ctx, image.redactions, canvas.width, canvas.height);
   const scaleBase = Math.max(canvas.width, canvas.height);
   const ordered = image.placements
     .slice()
@@ -1077,6 +1275,48 @@ async function flattenAnnotatedImage(image: EditorImage): Promise<{
     imageWidth: canvas.width,
     imageHeight: canvas.height,
     placements: [],
+  };
+}
+
+async function flattenVoteImage(image: EditorImage): Promise<{
+  imageData: string;
+  imageMimeType: string;
+  imageWidth: number;
+  imageHeight: number;
+  placements: BadgePlacement[];
+}> {
+  const base = await loadImage(image.dataUrl);
+  const width = image.width || base.naturalWidth || base.width;
+  const height = image.height || base.naturalHeight || base.height;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return {
+      imageData: image.base64,
+      imageMimeType: image.mime,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      placements: image.placements,
+    };
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+  drawRedactionsOnContext(ctx, image.redactions, canvas.width, canvas.height);
+
+  const mime = "image/png";
+  const dataUrl = canvas.toDataURL(mime);
+  return {
+    imageData: dataUrl.split(",")[1] ?? "",
+    imageMimeType: mime,
+    imageWidth: canvas.width,
+    imageHeight: canvas.height,
+    placements: image.placements,
   };
 }
 

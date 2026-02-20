@@ -70,6 +70,10 @@ body {
   inset: 0;
 }
 
+.badges.is-hidden {
+  display: none;
+}
+
 .image-nav {
   position: absolute;
   bottom: 20px;
@@ -109,8 +113,8 @@ body {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.24);
   color: #fff;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   font-weight: 700;
   font-size: 23px;
   line-height: 1;
@@ -166,6 +170,48 @@ body {
 
 .quick-create:active {
   background: rgba(38, 194, 163, 0.75);
+}
+
+.badge-visibility {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 4;
+  border-radius: 999px;
+  width: 46px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(15, 15, 24, 0.65);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.badge-visibility::after {
+  content: "";
+  position: absolute;
+  width: 30px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 999px;
+  transform: rotate(-33deg) scaleX(0.6);
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.badge-visibility.is-off {
+  background: rgba(0, 0, 0, 0.45);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.badge-visibility.is-off::after {
+  opacity: 1;
+  transform: rotate(-33deg) scaleX(1);
 }
 
 .badge {
@@ -234,7 +280,7 @@ body {
     transparent calc(100% - var(--ring-width, 2px)),
     #000 calc(100% - var(--ring-width, 2px))
   );
-  animation: ring-spin 9s linear infinite;
+  animation: ring-spin 15s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
@@ -265,15 +311,15 @@ body {
 .elo {
   flex-shrink: 0;
   background: #16213e;
-  padding: 8px 12px;
-  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  padding: 4px 4px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .elo-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
 }
 
 .elo-slider-wrap {
@@ -285,14 +331,14 @@ body {
   width: 100%;
   -webkit-appearance: none;
   appearance: none;
-  height: 8px;
+  height: 9px;
   border-radius: 4px;
   outline: none;
   touch-action: manipulation;
 }
 
 .elo-slider::-webkit-slider-runnable-track {
-  height: 8px;
+  height: 9px;
   border-radius: 4px;
 }
 
@@ -308,7 +354,7 @@ body {
 }
 
 .elo-slider::-moz-range-track {
-  height: 8px;
+  height: 9px;
   border-radius: 4px;
 }
 
@@ -359,6 +405,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: 30px;
 }
 
 .elo-btn:disabled {

@@ -5,7 +5,7 @@
 // --- Tuning constants (single source of truth) ---
 
 export const MIN_VOTES_FOR_BADGE_CONSENSUS = 25;
-export const MIN_VOTES_FOR_ELO_CONSENSUS = 100;
+export const MIN_VOTES_FOR_ELO_CONSENSUS = 50;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
 export const MIN_VOTES_FOR_USER_FLAIR: number = MIN_VOTES_FOR_ELO_CONSENSUS;
 export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
@@ -277,10 +277,15 @@ export function iqmToClassification(
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
 ): Classification {
+  const stdDev = weightedStdDev(voteCounts, totalVotes);
+  if (stdDev >= INTERESTING_STD_DEV_THRESHOLD) {
+    return Classification.INTERESTING;
+  }
+
   // Special: Book
   const bookShare = (voteCounts[Classification.BOOK] ?? 0) / totalVotes;
   if (
-    bookShare >= BOOK_MIN_SHARE &&
+    bookShare > BOOK_MIN_SHARE &&
     iqm > BOOK_IQM_RANGE[0] &&
     iqm < BOOK_IQM_RANGE[1]
   ) {
@@ -290,7 +295,7 @@ export function iqmToClassification(
   // Special: Miss
   const missShare = (voteCounts[Classification.MISS] ?? 0) / totalVotes;
   if (
-    missShare >= MISS_MIN_SHARE &&
+    missShare > MISS_MIN_SHARE &&
     iqm > MISS_IQM_RANGE[0] &&
     iqm < MISS_IQM_RANGE[1]
   ) {
@@ -306,6 +311,31 @@ export function iqmToClassification(
   if (iqm >= -0.75) return Classification.INACCURACY;
   if (iqm >= -1.5) return Classification.MISTAKE;
   return Classification.BLUNDER;
+}
+
+function weightedStdDev(
+  voteCounts: Partial<Record<Classification, number>>,
+  totalVotes: number,
+): number {
+  if (totalVotes <= 0) return 0;
+  let weightedSum = 0;
+  for (const [classification, count] of Object.entries(voteCounts)) {
+    const votes = count ?? 0;
+    if (votes <= 0) continue;
+    const weight = CLASSIFICATION_WEIGHT[classification as Classification] ?? 0;
+    weightedSum += votes * weight;
+  }
+  const mean = weightedSum / totalVotes;
+
+  let weightedVarianceSum = 0;
+  for (const [classification, count] of Object.entries(voteCounts)) {
+    const votes = count ?? 0;
+    if (votes <= 0) continue;
+    const weight = CLASSIFICATION_WEIGHT[classification as Classification] ?? 0;
+    const diff = weight - mean;
+    weightedVarianceSum += votes * diff * diff;
+  }
+  return Math.sqrt(weightedVarianceSum / totalVotes);
 }
 
 /** Interpolate ELO color from color stops */

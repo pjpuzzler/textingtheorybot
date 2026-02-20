@@ -131,9 +131,46 @@ body {
   pointer-events: none;
 }
 
+.cm-redact-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .cm-badges {
   position: absolute;
   inset: 0;
+  z-index: 2;
+}
+
+.cm-marker-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(15, 15, 24, 0.7);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#cm-page-chip {
+  right: 56px;
+}
+
+.cm-marker-toggle.active {
+  background: rgba(38, 194, 163, 0.86);
+  border-color: rgba(255, 255, 255, 0.58);
 }
 
 .image-nav {
@@ -176,8 +213,8 @@ body {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.28);
   color: #fff;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   font-weight: 700;
   font-size: 23px;
   line-height: 1;
@@ -223,7 +260,8 @@ body {
   border-radius: 14px;
   transition: opacity 0.2s;
   text-align: center;
-  max-width: min(92%, 460px);
+  width: min(75vw, 560px);
+  max-width: min(75vw, 560px);
 }
 
 .hint.hidden {
@@ -391,7 +429,7 @@ body {
 }
 
 .side-btn {
-  padding: 5px 10px;
+  padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   background: transparent;
@@ -400,6 +438,7 @@ body {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  min-height: 36px;
 }
 
 #side-row {
@@ -425,7 +464,7 @@ body {
 
 .details-top-row .cm-btn-post {
   flex: 0 0 auto;
-  min-width: 68px;
+  min-width: 88px;
 }
 
 .side-btn.active {
@@ -463,11 +502,11 @@ body {
 .cm-btn-post {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  padding: 6px 9px;
+  padding: 8px 10px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  min-height: 32px;
+  min-height: 40px;
 }
 
 .cm-btn-add,
@@ -485,6 +524,10 @@ body {
   background: linear-gradient(135deg, #26c2a3, #1ea88d);
   color: #fff;
   min-width: 58px;
+}
+
+#cm-btn-next {
+  min-width: 88px;
 }
 
 .cm-btn-post:disabled {
@@ -614,10 +657,11 @@ body {
 
 .warn-btn {
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 9px 12px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+  min-height: 40px;
 }
 
 .warn-btn-secondary {

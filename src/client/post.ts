@@ -29,6 +29,7 @@ let imageLoadToken = 0;
 let lastBadgeLayoutKey = "";
 let lastUserInteractionAt = 0;
 let suppressCanvasExpandUntil = 0;
+let badgesVisible = true;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -43,6 +44,7 @@ const imgNext = $("img-next") as HTMLButtonElement;
 const imgDots = $("img-dots") as HTMLDivElement;
 const pageChip = $("page-chip") as HTMLDivElement;
 const quickCreateBtn = $("quick-create") as HTMLButtonElement;
+const badgeVisToggleBtn = $("badge-vis-toggle") as HTMLButtonElement;
 const eloEl = $("elo") as HTMLDivElement;
 const eloSlider = $("elo-slider") as HTMLInputElement;
 const eloVal = $("elo-val") as HTMLSpanElement;
@@ -69,7 +71,17 @@ function ringPhaseDelaySeconds(): number {
     typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now()
       : Date.now();
-  return -((nowMs % 6000) / 1000);
+  return -((nowMs % 15000) / 1000);
+}
+
+function applyBadgeVisibility(): void {
+  badgesEl.classList.toggle("is-hidden", !badgesVisible);
+  badgeVisToggleBtn.classList.toggle("is-off", !badgesVisible);
+  badgeVisToggleBtn.textContent = "👁";
+  badgeVisToggleBtn.setAttribute(
+    "aria-label",
+    badgesVisible ? "Hide badges" : "Show badges",
+  );
 }
 
 function markUserInteraction(): void {
@@ -217,6 +229,13 @@ async function init() {
     }
 
     postEl.style.display = "flex";
+    badgeVisToggleBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      badgesVisible = !badgesVisible;
+      applyBadgeVisibility();
+    });
+    applyBadgeVisibility();
     quickCreateBtn.addEventListener("click", (event) => {
       try {
         requestExpandedMode(event as unknown as MouseEvent, "create");
@@ -357,6 +376,7 @@ canvasEl.addEventListener("click", (event) => {
     target.closest(".badge") ||
     target.closest(".img-nav-btn") ||
     target.closest("#quick-create") ||
+    target.closest("#badge-vis-toggle") ||
     target.closest(".image-nav")
   ) {
     return;
@@ -385,6 +405,7 @@ function layoutBadges(force = false) {
   badgesEl.style.top = `${r.y}px`;
   badgesEl.style.width = `${r.w}px`;
   badgesEl.style.height = `${r.h}px`;
+  applyBadgeVisibility();
   badgesEl.innerHTML = "";
 
   image.placements.forEach((p) => {
