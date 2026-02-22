@@ -6,9 +6,7 @@ import {
   Classification,
   CLASSIFICATION_WEIGHT,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
-  MIN_VOTES_FOR_ELO_CONSENSUS,
   MIN_VOTES_FOR_POST_FLAIR,
-  MIN_VOTES_FOR_USER_FLAIR,
   MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
   MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
@@ -49,6 +47,7 @@ const votesKey = (pid: string, bid: string) => `tt:votes:${pid}:${bid}`;
 const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
+const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 
 // ============================
 // Entry point
@@ -364,6 +363,8 @@ async function onInit(): Promise<InitResponse> {
   const userVotes: Record<string, Classification> = {};
 
   if (postData) {
+    await finalizeEloIfTimedOut(postId, postData);
+
     const uvRaw = await redis.hGetAll(userVotesKey(postId, userId));
     for (const [bid, cls] of Object.entries(uvRaw)) {
       userVotes[bid] = cls as Classification;
@@ -387,7 +388,7 @@ async function onInit(): Promise<InitResponse> {
   if (allEloRaw) {
     const eloArr = JSON.parse(allEloRaw) as number[];
     eloVoteCount = eloArr.length;
-    if (eloArr.length >= MIN_VOTES_FOR_ELO_CONSENSUS) {
+    if (eloArr.length > 0) {
       consensusElo = Math.round(interquartileMean(eloArr));
     }
   }
@@ -661,10 +662,15 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
   const consensusElo =
     voteCount > 0 ? Math.round(interquartileMean(eloArr)) : elo;
 
-  // Update post flair
-  if (voteCount >= MIN_VOTES_FOR_POST_FLAIR) {
-    await updatePostFlair(postId, consensusElo, voteCount);
+  if (voteCount > 0 && isVoteWindowOpen(postData)) {
+    await updatePostFlair(postId, consensusElo, voteCount, {
+      showVisibleElo: voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
+      colorize: false,
+      tryUserFlair: false,
+    });
   }
+
+  await finalizeEloIfTimedOut(postId, postData);
 
   return {
     type: "vote-elo",
@@ -682,12 +688,17 @@ async function updatePostFlair(
   postId: string,
   elo: number,
   voteCount: number,
+  options?: {
+    showVisibleElo?: boolean;
+    colorize?: boolean;
+    tryUserFlair?: boolean;
+  },
 ): Promise<void> {
   try {
-    const visibleEloText =
-      voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR
-        ? `${elo} Elo`
-        : "??? Elo";
+    const showVisibleElo = options?.showVisibleElo ?? false;
+    const colorize = options?.colorize ?? false;
+    const shouldTryUserFlair = options?.tryUserFlair ?? false;
+    const visibleEloText = showVisibleElo ? `${elo} Elo` : "??? Elo";
     const formattedVoteCount = voteCount.toLocaleString("en-US");
     const flairText = `${visibleEloText} (${formattedVoteCount} ${
       voteCount === 1 ? "Vote" : "Votes"
@@ -710,21 +721,55 @@ async function updatePostFlair(
       text: flairText,
       textColor: "light",
     };
-    if (voteCount >= MIN_VOTES_FOR_USER_FLAIR) {
+    if (colorize) {
       flairPayload.backgroundColor = bgColor;
     }
     await reddit.setPostFlair(flairPayload);
 
-    // Check for [Me] user flair
-    if (voteCount === MIN_VOTES_FOR_USER_FLAIR) {
-      await tryUpdateUserFlair(postId, elo);
+    if (shouldTryUserFlair) {
+      await tryUpdateUserFlair(postId, elo, voteCount);
     }
   } catch (err) {
     console.error("Failed to update flair:", err);
   }
 }
 
-async function tryUpdateUserFlair(postId: string, elo: number): Promise<void> {
+async function finalizeEloIfTimedOut(
+  postId: string,
+  postData: PostData,
+): Promise<void> {
+  if (postData.mode !== "vote") return;
+  if (isVoteWindowOpen(postData)) return;
+
+  const finalized = await redis.get(eloFinalizedKey(postId));
+  if (finalized === "1") return;
+
+  const allEloRaw = await redis.get(eloVotesKey(postId));
+  const eloArr = allEloRaw ? (JSON.parse(allEloRaw) as number[]) : [];
+  const voteCount = eloArr.length;
+
+  if (voteCount < MIN_VOTES_FOR_POST_FLAIR) {
+    await redis.set(eloFinalizedKey(postId), "1");
+    return;
+  }
+
+  const consensusElo = Math.round(interquartileMean(eloArr));
+  const showVisibleElo = voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR;
+
+  await updatePostFlair(postId, consensusElo, voteCount, {
+    showVisibleElo: true,
+    colorize: showVisibleElo,
+    tryUserFlair: showVisibleElo,
+  });
+
+  await redis.set(eloFinalizedKey(postId), "1");
+}
+
+async function tryUpdateUserFlair(
+  postId: string,
+  elo: number,
+  voteCountAtTimeout: number,
+): Promise<void> {
   try {
     const postData = await getPostData(postId);
     if (!TITLE_ME_VOTE_REGEX.test(postData.title)) return;
@@ -758,11 +803,12 @@ async function tryUpdateUserFlair(postId: string, elo: number): Promise<void> {
 
     const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
     const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
+    const formattedVoteCount = voteCountAtTimeout.toLocaleString("en-US");
     await reddit.sendPrivateMessage({
       subject: `Your user flair on r/${subredditName} has been updated`,
-      text: `Your [post](${postUrl}) on r/${subredditName} reached ${MIN_VOTES_FOR_USER_FLAIR.toLocaleString(
-        "en-US",
-      )} Elo votes with a consensus of ${elo} Elo. Your user flair has been automatically updated. You can clear or change your flair from the subreddit user flair settings at any time.`,
+      text: `Your [post](${postUrl}) on r/${subredditName} has closed voting after 24 hours with ${formattedVoteCount} Elo ${
+        voteCountAtTimeout === 1 ? "vote" : "votes"
+      }. Final consensus is ${elo} Elo, and your user flair has been updated automatically. You can clear or change your flair at any time from subreddit flair settings.`,
       to: author.username,
     });
   } catch (err) {

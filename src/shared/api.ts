@@ -5,10 +5,10 @@
 // --- Tuning constants (single source of truth) ---
 
 export const MIN_VOTES_FOR_BADGE_CONSENSUS = 25;
-export const MIN_VOTES_FOR_ELO_CONSENSUS = 50;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
-export const MIN_VOTES_FOR_USER_FLAIR: number = MIN_VOTES_FOR_ELO_CONSENSUS;
 export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
+export const MIN_VOTES_FOR_USER_FLAIR: number =
+  MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR;
 export const MAX_POST_AGE_TO_VOTE_MS: number = 24 * 60 * 60 * 1000;
 
 export const MIN_ELO = 100;
@@ -110,20 +110,20 @@ export const BADGE_HINTS: Partial<Record<Classification, string>> = {
   [Classification.BOOK]:
     "A common, expected opener or standard follow-up. Must be the first message or follow another Book.",
   [Classification.MISS]:
-    "Missed an important opportunity, cue, or context in the conversation.",
+    "Missed an obvious opportunity, cue, or context in the conversation.",
 };
 
 // --- ELO ---
 
 export const ELO_COLOR_STOPS = [
   { elo: 100, hex: "#fa412d" },
-  { elo: 375, hex: "#ff7769" },
-  { elo: 650, hex: "#ffa459" },
-  { elo: 925, hex: "#f7c631" },
-  { elo: 1200, hex: "#95b776" },
-  { elo: 1475, hex: "#81b64c" },
-  { elo: 1750, hex: "#749bbf" },
-  { elo: 2025, hex: "#26c2a3" },
+  { elo: 400, hex: "#ff7769" },
+  { elo: 700, hex: "#ffa459" },
+  { elo: 1000, hex: "#f7c631" },
+  { elo: 1300, hex: "#95b776" },
+  { elo: 1600, hex: "#81b64c" },
+  { elo: 1900, hex: "#749bbf" },
+  { elo: 2200, hex: "#26c2a3" },
   { elo: 2200, hex: "#722f2c" },
 ] as const;
 
@@ -348,6 +348,7 @@ export function getEloColor(elo: number): string {
   for (let i = 0; i < ELO_COLOR_STOPS.length - 1; i++) {
     const a = ELO_COLOR_STOPS[i]!;
     const b = ELO_COLOR_STOPS[i + 1]!;
+    if (a.elo === b.elo) continue;
     if (elo >= a.elo && elo <= b.elo) {
       const t = (elo - a.elo) / (b.elo - a.elo);
       return lerpHex(a.hex, b.hex, t);

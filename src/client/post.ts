@@ -5,7 +5,7 @@ import {
   BADGE_HINTS,
   Classification,
   PICKER_CLASSIFICATIONS,
-  ELO_COLOR_STOPS,
+  getEloColor,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
   MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
@@ -30,6 +30,7 @@ let lastBadgeLayoutKey = "";
 let lastUserInteractionAt = 0;
 let suppressCanvasExpandUntil = 0;
 let badgesVisible = true;
+const ELO_THUMB_SIZE_PX = 24;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -194,12 +195,43 @@ function markerScaleBase(rect: ReturnType<typeof getCanvasRect>): number {
   return Math.max(rect.imgW, rect.imgH);
 }
 
-function eloGradientCSS(): string {
-  const stops = ELO_COLOR_STOPS.map((s) => {
-    const pct = ((s.elo - MIN_ELO) / (MAX_ELO - MIN_ELO)) * 100;
-    return `${s.hex} ${pct.toFixed(1)}%`;
-  }).join(", ");
-  return `linear-gradient(to right, ${stops})`;
+function eloGradientCSS(trackWidthPx: number): string {
+  const width = Math.max(1, trackWidthPx);
+  const leftPadPx = ELO_THUMB_SIZE_PX / 2;
+  const usablePx = Math.max(1, width - ELO_THUMB_SIZE_PX);
+  const step = 10;
+  const stops: string[] = [];
+
+  const minColor = getEloColor(MIN_ELO);
+  const maxColor = getEloColor(MAX_ELO);
+  stops.push(`${minColor} 0%`);
+
+  for (let elo = MIN_ELO; elo <= MAX_ELO; elo += step) {
+    const t = (elo - MIN_ELO) / (MAX_ELO - MIN_ELO);
+    const xPx = leftPadPx + t * usablePx;
+    const pct = (xPx / width) * 100;
+    stops.push(`${getEloColor(elo)} ${pct.toFixed(2)}%`);
+  }
+
+  if ((MAX_ELO - MIN_ELO) % step !== 0) {
+    const xPx = leftPadPx + usablePx;
+    const pct = (xPx / width) * 100;
+    stops.push(`${maxColor} ${pct.toFixed(2)}%`);
+  }
+
+  stops.push(`${maxColor} 100%`);
+
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
+
+function applyEloTrackVisuals(): void {
+  const width = Math.max(
+    1,
+    Math.round(
+      eloSlider.clientWidth || eloSlider.getBoundingClientRect().width || 0,
+    ),
+  );
+  eloSlider.style.background = eloGradientCSS(width);
 }
 
 async function init() {
@@ -444,7 +476,7 @@ function layoutBadges(force = false) {
           el.style.setProperty("--ring-width", `2px`);
         }
 
-        if (uv && !isOwnPost()) {
+        if (uv && !isOwnPost() && canVoteOnCurrentPost()) {
           const voteEl = document.createElement("div");
           voteEl.className = "badge-vote";
           const voteSz = Math.max(12, sizePx * 0.42);
@@ -696,7 +728,7 @@ async function voteBadge(p: BadgePlacement, cls: Classification) {
 }
 
 function setupElo() {
-  eloSlider.style.background = eloGradientCSS();
+  applyEloTrackVisuals();
 
   if (userElo !== null) {
     eloSlider.value = String(userElo);
@@ -713,7 +745,7 @@ function updateGmTickPosition() {
   const max = Number(eloSlider.max) || MAX_ELO;
   const gm = 2500;
   const clamped = Math.max(min, Math.min(max, gm));
-  const thumbSize = 24;
+  const thumbSize = ELO_THUMB_SIZE_PX;
   const track = eloSlider.clientWidth;
   const t = (clamped - min) / (max - min);
   const x = t * Math.max(0, track - thumbSize) + thumbSize / 2;
@@ -741,7 +773,10 @@ function updateEloDisplay() {
 }
 
 eloSlider.addEventListener("input", updateEloDisplay);
-window.addEventListener("resize", updateGmTickPosition);
+window.addEventListener("resize", () => {
+  applyEloTrackVisuals();
+  updateGmTickPosition();
+});
 
 eloBtn.addEventListener("click", async () => {
   if (postData && postData.creatorId === viewerUserId) {

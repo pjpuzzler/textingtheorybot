@@ -76,7 +76,7 @@ body {
 
 .image-nav {
   position: absolute;
-  bottom: 20px;
+  bottom: 56px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -109,10 +109,10 @@ body {
 }
 
 .img-nav-btn {
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(38, 194, 163, 0.88);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.24);
-  color: #fff;
+  background: rgba(10, 28, 35, 0.55);
+  color: #26c2a3;
   width: 38px;
   height: 38px;
   font-weight: 700;
@@ -143,9 +143,9 @@ body {
   padding: 4px 12px;
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
-  background: rgba(22, 33, 62, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #b8f5ea;
+  background: rgba(38, 194, 163, 0.2);
+  border: 1px solid rgba(38, 194, 163, 0.58);
 }
 
 .quick-create {
@@ -180,9 +180,9 @@ body {
   border-radius: 999px;
   width: 46px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(38, 194, 163, 0.75);
   background: rgba(15, 15, 24, 0.65);
-  color: #fff;
+  color: #26c2a3;
   font-size: 22px;
   line-height: 1;
   display: inline-flex;
@@ -311,7 +311,7 @@ body {
 .elo {
   flex-shrink: 0;
   background: #16213e;
-  padding: 4px 4px;
+  padding: 4px 10px;
   padding-bottom: max(4px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
