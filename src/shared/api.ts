@@ -172,6 +172,7 @@ export type InitResponse = {
   postId: string;
   username: string;
   userId: string;
+  isModerator: boolean;
   postData: PostData | null;
   consensus: Record<string, BadgeConsensus>;
   userVotes: Record<string, Classification>;
@@ -196,6 +197,22 @@ export type CreatePostRequest = {
 
 export type CreatePostResponse = {
   type: "create-post";
+  postId: string;
+  postUrl: string;
+};
+
+export type UpdatePostRequest = {
+  images: Array<{
+    imageData: string;
+    imageMimeType: string;
+    imageWidth: number;
+    imageHeight: number;
+    placements: BadgePlacement[];
+  }>;
+};
+
+export type UpdatePostResponse = {
+  type: "update-post";
   postId: string;
   postUrl: string;
 };
@@ -230,6 +247,7 @@ export type VoteEloResponse = {
 export const ApiEndpoint = {
   Init: "/api/init",
   CreatePost: "/api/create-post",
+  UpdatePost: "/api/update-post",
   VoteBadge: "/api/vote-badge",
   VoteElo: "/api/vote-elo",
   MenuCreate: "/internal/menu/create",

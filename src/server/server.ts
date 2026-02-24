@@ -18,6 +18,8 @@ import {
   getEloColor,
   type CreatePostRequest,
   type CreatePostResponse,
+  type UpdatePostRequest,
+  type UpdatePostResponse,
   type InitResponse,
   type VoteBadgeRequest,
   type VoteBadgeResponse,
@@ -78,6 +80,7 @@ type ErrorResponse = { error: string; status: number };
 type ApiResponse =
   | InitResponse
   | CreatePostResponse
+  | UpdatePostResponse
   | VoteBadgeResponse
   | VoteEloResponse;
 
@@ -100,6 +103,9 @@ async function onRequest(
       break;
     case ApiEndpoint.CreatePost:
       body = await onCreatePost(req);
+      break;
+    case ApiEndpoint.UpdatePost:
+      body = await onUpdatePost(req);
       break;
     case ApiEndpoint.MenuCreate:
       const newPost = await reddit.submitCustomPost({
@@ -176,6 +182,62 @@ function getUserId(): string {
   const uid = context.userId;
   if (!uid) throw new Error("No userId in context");
   return uid;
+}
+
+async function assertCanCreatePost(): Promise<void> {
+  const subredditName = context.subredditName;
+  if (!subredditName) return;
+
+  const username = await reddit.getCurrentUsername();
+  if (!username) return;
+
+  try {
+    const bannedUsers = await reddit
+      .getBannedUsers({
+        subredditName,
+        username,
+        limit: 1,
+        pageSize: 1,
+      })
+      .all();
+    if (
+      bannedUsers.some(
+        (bannedUser: { username: string }) => bannedUser.username === username,
+      )
+    ) {
+      throw { status: 403, message: "Banned users cannot create posts" };
+    }
+  } catch (err) {
+    if (typeof err === "object" && err && "status" in err) {
+      throw err;
+    }
+  }
+}
+
+async function isCurrentUserModerator(): Promise<boolean> {
+  const subredditName = context.subredditName;
+  if (!subredditName) return false;
+
+  const username = await reddit.getCurrentUsername();
+  if (!username) return false;
+
+  try {
+    const moderators = await reddit
+      .getModerators({ subredditName, username, limit: 1, pageSize: 1 })
+      .all();
+    return moderators.some(
+      (moderator: { username: string }) => moderator.username === username,
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function assertCurrentUserModerator(): Promise<void> {
+  const isModerator = await isCurrentUserModerator();
+  if (!isModerator) {
+    throw { status: 403, message: "Only moderators can edit posts" };
+  }
 }
 
 async function getPostData(pid: string): Promise<PostData> {
@@ -350,6 +412,7 @@ async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
   const userId = getUserId();
   const username = (await reddit.getCurrentUsername()) ?? "unknown";
+  const isModerator = await isCurrentUserModerator();
 
   let postData: PostData | null = null;
   try {
@@ -372,7 +435,19 @@ async function onInit(): Promise<InitResponse> {
 
     for (const { placement } of getAllPlacements(postData)) {
       const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
-      consensus[placement.id] = computeBadgeConsensus(allVotes);
+      const computed = computeBadgeConsensus(allVotes);
+      if (
+        !isVoteWindowOpen(postData) &&
+        !computed.classification &&
+        computed.totalVotes > 0
+      ) {
+        computed.classification = iqmToClassification(
+          computed.iqm,
+          computed.voteCounts,
+          computed.totalVotes,
+        );
+      }
+      consensus[placement.id] = computed;
     }
   }
 
@@ -398,12 +473,103 @@ async function onInit(): Promise<InitResponse> {
     postId,
     username,
     userId,
+    isModerator,
     postData,
     consensus,
     userVotes,
     userElo,
     consensusElo,
     eloVoteCount,
+  };
+}
+
+async function removeVotesForBadge(postId: string, badgeId: string): Promise<void> {
+  await redis.del(votesKey(postId, badgeId));
+}
+
+async function removeBookVotesForBadge(
+  postId: string,
+  badgeId: string,
+): Promise<void> {
+  const allVotes = await redis.hGetAll(votesKey(postId, badgeId));
+  const bookVoterIds = Object.entries(allVotes)
+    .filter(([, cls]) => cls === Classification.BOOK)
+    .map(([userId]) => userId);
+  if (bookVoterIds.length === 0) return;
+  await redis.hDel(votesKey(postId, badgeId), bookVoterIds);
+}
+
+async function onUpdatePost(req: IncomingMessage): Promise<UpdatePostResponse> {
+  await assertCurrentUserModerator();
+
+  const postId = getPostId();
+  const body = await readJSON<UpdatePostRequest>(req);
+  if (!body.images?.length) throw new Error("At least one image is required");
+
+  const existingPost = await getPostData(postId);
+  const maxImages =
+    existingPost.mode === "annotated"
+      ? MAX_ANNOTATED_POST_IMAGES
+      : MAX_VOTE_POST_IMAGES;
+  if (body.images.length > maxImages) {
+    throw new Error(`Max ${maxImages} images`);
+  }
+
+  const uploads: PostImageData[] = [];
+  for (const image of body.images) {
+    const dataUrl = `data:${image.imageMimeType};base64,${image.imageData}`;
+    const upload = await media.upload({ url: dataUrl, type: "image" });
+    uploads.push({
+      imageUrl: upload.mediaUrl,
+      imageWidth: image.imageWidth,
+      imageHeight: image.imageHeight,
+      placements: image.placements,
+    });
+  }
+
+  const oldPlacements = existingPost.images
+    .flatMap((image) => image.placements)
+    .map((placement) => ({ id: placement.id, order: placement.order ?? 0 }));
+  const newPlacements = uploads
+    .flatMap((image) => image.placements)
+    .map((placement) => ({ id: placement.id, order: placement.order ?? 0 }));
+
+  const oldIds = new Set(oldPlacements.map((placement) => placement.id));
+  const newIds = new Set(newPlacements.map((placement) => placement.id));
+
+  for (const oldId of oldIds) {
+    if (!newIds.has(oldId)) {
+      await removeVotesForBadge(postId, oldId);
+    }
+  }
+
+  const oldOrderMap = new Map(
+    oldPlacements.map((placement) => [placement.id, placement.order]),
+  );
+  const orderChanged = newPlacements.some(
+    (placement) => oldOrderMap.get(placement.id) !== placement.order,
+  );
+
+  if (orderChanged) {
+    for (const badgeId of newIds) {
+      await removeBookVotesForBadge(postId, badgeId);
+    }
+  }
+
+  const updatedPost: PostData = {
+    ...existingPost,
+    images: uploads,
+  };
+  await redis.set(postKey(postId), JSON.stringify(updatedPost));
+
+  const subredditName = context.subredditName ?? "TextingTheory";
+  const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
+  const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
+
+  return {
+    type: "update-post",
+    postId,
+    postUrl,
   };
 }
 
@@ -415,6 +581,8 @@ async function onCreatePost(
 ): Promise<CreatePostResponse | UiResponse> {
   const userId = getUserId();
   const body = await readJSON<CreatePostRequest>(req);
+
+  await assertCanCreatePost();
 
   if (body.mode === "vote" && body.eloSide === "other") {
     const other = (body.eloOtherText ?? "").trim();
@@ -772,7 +940,9 @@ async function tryUpdateUserFlair(
 ): Promise<void> {
   try {
     const postData = await getPostData(postId);
-    if (!TITLE_ME_VOTE_REGEX.test(postData.title)) return;
+    const isMeTarget =
+      postData.eloSide === "me" || TITLE_ME_VOTE_REGEX.test(postData.title);
+    if (!isMeTarget) return;
 
     const subredditName = context.subredditName;
     if (!subredditName) return;

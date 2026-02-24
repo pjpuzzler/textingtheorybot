@@ -7,8 +7,11 @@ import {
   BADGE_HINTS,
   MAX_VOTE_POST_IMAGES,
   MAX_ANNOTATED_POST_IMAGES,
+  type InitResponse,
   type CreatePostRequest,
   type CreatePostResponse,
+  type UpdatePostRequest,
+  type UpdatePostResponse,
   type BadgePlacement,
   type PostMode,
   type EloSide,
@@ -39,6 +42,7 @@ const VOTE_MIN_RADIUS = 4;
 const ANNOTATED_MIN_RADIUS = 2;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
+const PAGE_SLIDE_DURATION_MS = 150;
 
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
@@ -59,6 +63,18 @@ let isSubmitting = false;
 let markerModeEnabled = false;
 let drawingPointerId: number | null = null;
 let activeStroke: RedactionStroke | null = null;
+let imageSlideDirection: "prev" | "next" | null = null;
+let pendingCreateSlideImageSrc: string | null = null;
+let pendingCreateSlideBadges: {
+  badgesHtml: string;
+  badgesLeft: string;
+  badgesTop: string;
+  badgesWidth: string;
+  badgesHeight: string;
+} | null = null;
+let navTransitionInFlight = false;
+let queuedNavIndex: number | null = null;
+let isEditSession = false;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -82,6 +98,8 @@ const cmImgNext = $("cm-img-next") as HTMLButtonElement;
 const cmImgDots = $("cm-img-dots") as HTMLDivElement;
 
 const cmSize = $("cm-size") as HTMLInputElement;
+const cmOrderUp = $("cm-order-up") as HTMLButtonElement;
+const cmOrderDown = $("cm-order-down") as HTMLButtonElement;
 const cmPost = $("cm-btn-post") as HTMLButtonElement;
 const cmNext = $("cm-btn-next") as HTMLButtonElement;
 const submitOvl = $("overlay-submit") as HTMLDivElement;
@@ -112,9 +130,80 @@ let pendingNewAnnotation: BadgePlacement | null = null;
 let suppressEditorPickerUntil = 0;
 
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
+const TITLE_FORBIDDEN_CHARS_REGEX = /[\[\]]/g;
+const query = new URLSearchParams(window.location.search);
+const isEditBootRequested = query.get("mode") === "edit";
+
+if (isEditBootRequested) {
+  screenMode.style.display = "none";
+  createModal.classList.add("open");
+  submitOvl.style.display = "flex";
+  submitText.textContent = "Loading editor…";
+}
 
 function sanitizeOtherEloLabel(value: string): string {
   return value.replace(/[^A-Za-z]/g, "").slice(0, 16);
+}
+
+async function loadRemoteImageAsEditorImage(
+  imageUrl: string,
+  placements: BadgePlacement[],
+): Promise<EditorImage> {
+  const response = await fetch(imageUrl, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch existing post image");
+  }
+  const blob = await response.blob();
+  const dataUrl = await readBlobAsDataUrl(blob);
+  const loaded = await loadImage(dataUrl);
+  return {
+    dataUrl,
+    base64: dataUrl.split(",")[1] ?? "",
+    mime: blob.type || "image/png",
+    width: loaded.naturalWidth || loaded.width,
+    height: loaded.naturalHeight || loaded.height,
+    placements: placements.map((placement) => ({ ...placement })),
+    redactions: [],
+  };
+}
+
+async function initEditSessionIfRequested(): Promise<void> {
+  if (!isEditBootRequested) return;
+
+  try {
+    const res = await fetch(ApiEndpoint.Init);
+    if (!res.ok) throw new Error("Failed to load post");
+    const data = (await res.json()) as InitResponse;
+    if (!data.isModerator) {
+      throw new Error("Only moderators can edit posts");
+    }
+    if (!data.postData) {
+      throw new Error("No post data found for this post");
+    }
+
+    isEditSession = true;
+    mode = data.postData.mode;
+    eloSide = data.postData.eloSide ?? "right";
+    meChecked = data.postData.eloSide === "me" || data.postData.eloSide === "right";
+
+    images = await Promise.all(
+      data.postData.images.map((image) =>
+        loadRemoteImageAsEditorImage(image.imageUrl, image.placements),
+      ),
+    );
+    normalizePlacementOrders();
+    activeImageIndex = 0;
+    cmNext.textContent = "Save";
+    cmPost.textContent = "Save";
+    detailsModal.classList.remove("open");
+    openEditor();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to start edit mode";
+    alert(message);
+    window.location.href = "/";
+  } finally {
+    submitOvl.style.display = "none";
+  }
 }
 
 globalRadius = Number(cmSize.value) || globalRadius;
@@ -297,6 +386,20 @@ otherInput.addEventListener("input", () => {
   }
 });
 
+cmTitle.addEventListener("beforeinput", (event) => {
+  const data = event.data ?? "";
+  if (data.includes("[") || data.includes("]")) {
+    event.preventDefault();
+  }
+});
+
+cmTitle.addEventListener("input", () => {
+  const cleaned = cmTitle.value.replace(TITLE_FORBIDDEN_CHARS_REGEX, "");
+  if (cmTitle.value !== cleaned) {
+    cmTitle.value = cleaned;
+  }
+});
+
 function openEditor() {
   applySliderBoundsForMode();
   globalRadius = Number(cmSize.value) || globalRadius;
@@ -311,7 +414,7 @@ function openEditor() {
   //       : "Tap to place a badge by every relevant message. Don't cover anything important.";
   syncPlacementRadiiFromSlider();
   updateSideUI();
-  loadActiveImage();
+  loadActiveImage(false);
 }
 
 function updateMarkerToggleUI(): void {
@@ -334,9 +437,10 @@ function updateImageNav() {
     if (index === activeImageIndex) dot.classList.add("active");
     cmImgDots.appendChild(dot);
   }
-  cmImgPrev.style.display = activeImageIndex > 0 ? "inline-flex" : "none";
-  cmImgNext.style.display =
-    activeImageIndex < images.length - 1 ? "inline-flex" : "none";
+  cmImgPrev.style.display = hasMultiple ? "inline-flex" : "none";
+  cmImgNext.style.display = hasMultiple ? "inline-flex" : "none";
+  cmImgPrev.disabled = !hasMultiple || activeImageIndex <= 0;
+  cmImgNext.disabled = !hasMultiple || activeImageIndex >= images.length - 1;
 }
 
 cmImageNav.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -345,35 +449,247 @@ cmImageNav.addEventListener("click", (event) => event.stopPropagation());
 function updateNextEnabled() {
   const hasAnyPlacements = images.some((img) => img.placements.length > 0);
   cmNext.disabled = !hasAnyPlacements;
+  const selected = selectedId;
+  if (!selected) {
+    cmOrderUp.disabled = true;
+    cmOrderDown.disabled = true;
+    return;
+  }
+
+  const sorted = images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const idx = sorted.findIndex((placement) => placement.id === selected);
+  cmOrderUp.disabled = idx <= 0;
+  cmOrderDown.disabled = idx < 0 || idx >= sorted.length - 1;
 }
 
+function normalizePlacementOrders(): void {
+  const sorted = images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  sorted.forEach((placement, index) => {
+    placement.order = index;
+  });
+}
+
+function moveSelectedBadgeOrder(delta: -1 | 1): void {
+  if (!selectedId) return;
+  const sorted = images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const idx = sorted.findIndex((placement) => placement.id === selectedId);
+  const swapIdx = idx + delta;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+
+  const currentOrder = sorted[idx]!.order ?? idx;
+  const otherOrder = sorted[swapIdx]!.order ?? swapIdx;
+  sorted[idx]!.order = otherOrder;
+  sorted[swapIdx]!.order = currentOrder;
+  normalizePlacementOrders();
+  render();
+}
+
+cmOrderUp.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  moveSelectedBadgeOrder(-1);
+});
+
+cmOrderDown.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  moveSelectedBadgeOrder(1);
+});
+
 cmImgPrev.addEventListener("click", () => {
-  if (activeImageIndex <= 0) return;
-  activeImageIndex -= 1;
-  selectedId = null;
-  loadActiveImage();
+  navigateToImage(activeImageIndex - 1);
 });
 
 cmImgNext.addEventListener("click", () => {
-  if (activeImageIndex >= images.length - 1) return;
-  activeImageIndex += 1;
-  selectedId = null;
-  loadActiveImage();
+  navigateToImage(activeImageIndex + 1);
 });
 
-function loadActiveImage() {
+function navigateToImage(nextIndex: number): void {
+  if (
+    nextIndex < 0 ||
+    nextIndex >= images.length ||
+    nextIndex === activeImageIndex
+  )
+    return;
+  if (navTransitionInFlight) {
+    queuedNavIndex = nextIndex;
+    return;
+  }
+  startNavigationTo(nextIndex);
+}
+
+function startNavigationTo(nextIndex: number): void {
+  navTransitionInFlight = true;
+  pendingCreateSlideImageSrc = cmImg.currentSrc || cmImg.src || null;
+  pendingCreateSlideBadges = {
+    badgesHtml: cmBadges.innerHTML,
+    badgesLeft: cmBadges.style.left,
+    badgesTop: cmBadges.style.top,
+    badgesWidth: cmBadges.style.width,
+    badgesHeight: cmBadges.style.height,
+  };
+  imageSlideDirection = nextIndex > activeImageIndex ? "next" : "prev";
+  activeImageIndex = nextIndex;
+  selectedId = null;
+  loadActiveImage();
+}
+
+function completeNavigationTransition(): void {
+  navTransitionInFlight = false;
+  const queued = queuedNavIndex;
+  queuedNavIndex = null;
+  if (
+    queued !== null &&
+    queued !== activeImageIndex &&
+    queued >= 0 &&
+    queued < images.length
+  ) {
+    startNavigationTo(queued);
+  }
+}
+
+function loadActiveImage(animate = true) {
   const image = getActiveImage();
-  cmImg.onload = () => {
+  const directionForAnimation = imageSlideDirection;
+  const outgoingImageSrc = pendingCreateSlideImageSrc;
+  const outgoingBadges = pendingCreateSlideBadges;
+  pendingCreateSlideImageSrc = null;
+  pendingCreateSlideBadges = null;
+  const shouldAnimate =
+    animate && !!directionForAnimation && images.length > 1 && !!cmImg.src;
+
+  const finalizeLoadedImage = () => {
+    cmImg.src = image.dataUrl;
     render();
     requestAnimationFrame(() => {
       render();
+      if (shouldAnimate && directionForAnimation) {
+        playCreateSlideAnimation(
+          directionForAnimation,
+          outgoingImageSrc,
+          outgoingBadges,
+        );
+      } else {
+        completeNavigationTransition();
+      }
     });
+    imageSlideDirection = null;
   };
-  cmImg.src = image.dataUrl;
-  if (cmImg.complete) {
-    cmImg.onload?.(new Event("load"));
+
+  const currentUrl = cmImg.currentSrc || cmImg.src;
+  if (currentUrl && currentUrl === image.dataUrl) {
+    finalizeLoadedImage();
+  } else {
+    const preloader = new Image();
+    preloader.decoding = "async";
+    preloader.onload = finalizeLoadedImage;
+    preloader.onerror = finalizeLoadedImage;
+    preloader.src = image.dataUrl;
   }
   updateImageNav();
+}
+
+function playCreateSlideAnimation(
+  direction: "prev" | "next",
+  outgoingImageSrc: string | null,
+  outgoingBadges: {
+    badgesHtml: string;
+    badgesLeft: string;
+    badgesTop: string;
+    badgesWidth: string;
+    badgesHeight: string;
+  } | null,
+): void {
+  const travelPx = Math.max(
+    1,
+    cmCanvasWrap.clientWidth || cmCanvasWrap.getBoundingClientRect().width || 1,
+  );
+  const incomingFromX = direction === "next" ? travelPx : -travelPx;
+  const outgoingToX = direction === "next" ? -travelPx : travelPx;
+  const durationMs = PAGE_SLIDE_DURATION_MS;
+  const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+  let ghostImg: HTMLImageElement | null = null;
+  let ghostBadges: HTMLDivElement | null = null;
+  if (outgoingImageSrc) {
+    ghostImg = document.createElement("img");
+    ghostImg.className = "cm-img";
+    ghostImg.src = outgoingImageSrc;
+    ghostImg.style.position = "absolute";
+    ghostImg.style.inset = "0";
+    ghostImg.style.zIndex = "2";
+    ghostImg.style.transform = "translateX(0)";
+    ghostImg.style.pointerEvents = "none";
+    cmCanvasWrap.appendChild(ghostImg);
+  }
+
+  if (outgoingBadges) {
+    ghostBadges = document.createElement("div");
+    ghostBadges.className = "cm-badges";
+    ghostBadges.style.left = outgoingBadges.badgesLeft;
+    ghostBadges.style.top = outgoingBadges.badgesTop;
+    ghostBadges.style.width = outgoingBadges.badgesWidth;
+    ghostBadges.style.height = outgoingBadges.badgesHeight;
+    ghostBadges.style.zIndex = "3";
+    ghostBadges.style.pointerEvents = "none";
+    ghostBadges.style.transform = "translateX(0)";
+    ghostBadges.innerHTML = outgoingBadges.badgesHtml;
+    cmCanvasWrap.appendChild(ghostBadges);
+  }
+
+  const incomingElements: HTMLElement[] = [cmImg, cmBadges];
+  const outgoingElements: HTMLElement[] = [];
+  if (ghostImg) outgoingElements.push(ghostImg);
+  if (ghostBadges) outgoingElements.push(ghostBadges);
+
+  for (const element of incomingElements) {
+    element.style.transition = "none";
+    element.style.transform = `translateX(${incomingFromX}px)`;
+    void element.offsetWidth;
+  }
+
+  if (ghostImg) {
+    ghostImg.style.transition = "none";
+    ghostImg.style.transform = "translateX(0)";
+    void ghostImg.offsetWidth;
+  }
+  if (ghostBadges) {
+    ghostBadges.style.transition = "none";
+    ghostBadges.style.transform = "translateX(0)";
+    void ghostBadges.offsetWidth;
+  }
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      for (const element of incomingElements) {
+        element.style.transition = `transform ${durationMs}ms ${easing}`;
+        element.style.transform = "translateX(0)";
+      }
+      for (const element of outgoingElements) {
+        element.style.transition = `transform ${durationMs}ms ${easing}`;
+        element.style.transform = `translateX(${outgoingToX}px)`;
+      }
+    });
+  });
+
+  window.setTimeout(() => {
+    for (const element of incomingElements) {
+      element.style.transition = "";
+      element.style.transform = "";
+    }
+    ghostImg?.remove();
+    ghostBadges?.remove();
+    completeNavigationTransition();
+  }, durationMs + 40);
 }
 
 function canvasRect() {
@@ -490,6 +806,7 @@ function render() {
         event.stopPropagation();
         const next = getActivePlacements().filter((p) => p.id !== placement.id);
         getActiveImage().placements = next;
+        normalizePlacementOrders();
         selectedId = null;
         render();
       });
@@ -587,6 +904,7 @@ cmCanvasWrap.addEventListener("click", (event) => {
     openClassPicker(p, true);
   } else {
     getActivePlacements().push(p);
+    normalizePlacementOrders();
     selectedId = id;
     hintEl.classList.add("hidden");
     render();
@@ -800,6 +1118,10 @@ cmSize.addEventListener("input", () => {
 
 cmNext.addEventListener("click", () => {
   if (cmNext.disabled) return;
+  if (isEditSession) {
+    void submitEditSession();
+    return;
+  }
   if (getTotalPlacements() === 1) {
     singleBadgeModal.classList.add("open");
     return;
@@ -832,7 +1154,64 @@ detailsBg.addEventListener("click", () =>
   detailsModal.classList.remove("open"),
 );
 
+async function submitEditSession(): Promise<void> {
+  if (!isEditSession || isSubmitting) return;
+  if (!images.length) {
+    alert("Add at least one image.");
+    return;
+  }
+  const hasAnyPlacements = images.some((img) => img.placements.length > 0);
+  if (!hasAnyPlacements) {
+    alert("Add at least one badge.");
+    return;
+  }
+
+  normalizePlacementOrders();
+
+  submitOvl.style.display = "flex";
+  submitText.textContent = "Saving edits…";
+  isSubmitting = true;
+
+  try {
+    const payloadImages = await Promise.all(images.map((img) => flattenVoteImage(img)));
+    const body: UpdatePostRequest = {
+      images: payloadImages,
+    };
+
+    const res = await fetch(ApiEndpoint.UpdatePost, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Update failed" }));
+      throw new Error((err as { error?: string }).error ?? "Update failed");
+    }
+
+    const data = (await res.json()) as UpdatePostResponse;
+    submitText.textContent = "Edits saved";
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    try {
+      navigateTo(data.postUrl);
+    } catch {
+      window.location.href = data.postUrl;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to save edits";
+    alert(message);
+  } finally {
+    submitOvl.style.display = "none";
+    isSubmitting = false;
+  }
+}
+
 cmPost.addEventListener("click", async () => {
+  if (isEditSession) {
+    await submitEditSession();
+    return;
+  }
+
   if (isSubmitting) return;
   if (!images.length) {
     alert("Add at least one image.");
@@ -846,6 +1225,8 @@ cmPost.addEventListener("click", async () => {
   }
 
   let title = cmTitle.value.trim();
+  title = title.replace(TITLE_FORBIDDEN_CHARS_REGEX, "").trim();
+  cmTitle.value = title;
   if (!title) {
     alert("Please enter a title.");
     cmTitle.focus();
@@ -1329,6 +1710,15 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -1337,3 +1727,5 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
     img.src = dataUrl;
   });
 }
+
+void initEditSessionIfRequested();

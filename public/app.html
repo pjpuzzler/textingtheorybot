@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <script>
+      (() => {
+        try {
+          const query = new URLSearchParams(window.location.search);
+          if (query.get("mode") === "edit") {
+            document.documentElement.classList.add("tt-edit-boot");
+          }
+        } catch {
+          // no-op
+        }
+      })();
+    </script>
     <link rel="stylesheet" type="text/css" href="app.css" />
     <meta charset="UTF-8" />
     <meta
@@ -38,7 +50,7 @@
         </div>
         <div>
           <div class="mode-name">Annotate Myself</div>
-          <div class="mode-sub">Place your own badges</div>
+          <div class="mode-sub">Place your own badges (no Elo voting)</div>
           <div class="mode-hint">Max 1 image</div>
         </div>
       </div>
@@ -92,6 +104,8 @@
               step="0.1"
               value="6"
             />
+            <button class="cm-mini-btn" id="cm-order-up" aria-label="Move badge up">↑</button>
+            <button class="cm-mini-btn" id="cm-order-down" aria-label="Move badge down">↓</button>
             <button class="cm-btn-post" id="cm-btn-next">Next</button>
           </div>
         </div>

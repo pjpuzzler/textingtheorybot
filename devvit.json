@@ -17,6 +17,9 @@
       },
       "create": {
         "entry": "app.html"
+      },
+      "edit": {
+        "entry": "app.html?mode=edit"
       }
     }
   },

@@ -63,11 +63,49 @@ body {
   height: 100%;
   object-fit: contain;
   pointer-events: none;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s
+    ease;
+}
+
+.canvas-img.slide-from-right {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.canvas-img.slide-from-left {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+.canvas-img.slide-in {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .badges {
   position: absolute;
   inset: 0;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s
+    ease;
+}
+
+.badges.slide-from-right {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.badges.slide-from-left {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+.badges.slide-in {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .badges.is-hidden {
@@ -76,62 +114,80 @@ body {
 
 .image-nav {
   position: absolute;
-  bottom: 56px;
+  inset: 0;
+  display: flex;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.img-dots {
+  position: absolute;
   left: 50%;
+  bottom: 16px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 108px;
-  padding: 0 40px;
-}
-
-.img-dots {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  gap: 6px;
   max-width: min(220px, calc(100vw - 140px));
   overflow: hidden;
+  background: rgba(0, 0, 0, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 6px 12px;
+  pointer-events: auto;
 }
 
 .img-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(0, 0, 0, 0.4);
+  background: rgba(255, 255, 255, 0.62);
+  border: none;
 }
 
 .img-dot.active {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   background: #fff;
 }
 
 .img-nav-btn {
-  border: 1px solid rgba(38, 194, 163, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.62);
   border-radius: 999px;
-  background: rgba(10, 28, 35, 0.55);
-  color: #26c2a3;
-  width: 38px;
-  height: 38px;
+  background: rgba(0, 0, 0, 0.42);
+  color: rgba(255, 255, 255, 0.95);
+  width: 36px;
+  height: 36px;
   font-weight: 700;
-  font-size: 23px;
+  font-size: 22px;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  pointer-events: auto;
+}
+
+.img-nav-btn:disabled {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.42);
+  cursor: default;
 }
 
 #img-prev {
   position: absolute;
-  left: 0;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 #img-next {
   position: absolute;
-  right: 0;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .page-chip {
@@ -140,12 +196,12 @@ body {
   right: 8px;
   z-index: 4;
   border-radius: 999px;
-  padding: 4px 12px;
+  padding: 4px 10px;
   font-size: 13px;
   font-weight: 700;
-  color: #b8f5ea;
-  background: rgba(38, 194, 163, 0.2);
-  border: 1px solid rgba(38, 194, 163, 0.58);
+  color: #fff;
+  background: rgba(0, 0, 0, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .quick-create {
@@ -172,6 +228,31 @@ body {
   background: rgba(38, 194, 163, 0.75);
 }
 
+.mod-edit {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 4;
+  border-radius: 999px;
+  min-width: 58px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mod-edit:active {
+  background: rgba(0, 0, 0, 0.65);
+}
+
 .badge-visibility {
   position: absolute;
   right: 10px;
@@ -180,9 +261,9 @@ body {
   border-radius: 999px;
   width: 46px;
   height: 36px;
-  border: 1px solid rgba(38, 194, 163, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   background: rgba(15, 15, 24, 0.65);
-  color: #26c2a3;
+  color: rgba(255, 255, 255, 0.88);
   font-size: 22px;
   line-height: 1;
   display: inline-flex;
@@ -226,6 +307,10 @@ body {
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
+}
+
+.badge--live-window {
+  opacity: 0.9;
 }
 
 .badge--placeholder,
@@ -311,8 +396,8 @@ body {
 .elo {
   flex-shrink: 0;
   background: #16213e;
-  padding: 4px 10px;
-  padding-bottom: max(4px, env(safe-area-inset-bottom));
+  padding: 6px 8px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 

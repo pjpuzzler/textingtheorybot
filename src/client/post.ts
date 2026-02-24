@@ -24,12 +24,25 @@ let userElo: number | null = null;
 let lastSubmittedElo: number | null = null;
 let activeImageIndex = 0;
 let viewerUserId = "";
+let viewerIsModerator = false;
 let refreshTimer: number | null = null;
 let imageLoadToken = 0;
 let lastBadgeLayoutKey = "";
 let lastUserInteractionAt = 0;
 let suppressCanvasExpandUntil = 0;
 let badgesVisible = true;
+let imageSlideDirection: "prev" | "next" | null = null;
+let pendingSlideSnapshot: {
+  imageSrc: string;
+  badgesHtml: string;
+  badgesLeft: string;
+  badgesTop: string;
+  badgesWidth: string;
+  badgesHeight: string;
+} | null = null;
+let navTransitionInFlight = false;
+let queuedNavIndex: number | null = null;
+const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -45,6 +58,7 @@ const imgNext = $("img-next") as HTMLButtonElement;
 const imgDots = $("img-dots") as HTMLDivElement;
 const pageChip = $("page-chip") as HTMLDivElement;
 const quickCreateBtn = $("quick-create") as HTMLButtonElement;
+const modEditBtn = $("mod-edit") as HTMLButtonElement;
 const badgeVisToggleBtn = $("badge-vis-toggle") as HTMLButtonElement;
 const eloEl = $("elo") as HTMLDivElement;
 const eloSlider = $("elo-slider") as HTMLInputElement;
@@ -245,6 +259,7 @@ async function init() {
     userElo = data.userElo;
     lastSubmittedElo = userElo;
     viewerUserId = data.userId;
+    viewerIsModerator = !!data.isModerator;
 
     loadingEl.style.display = "none";
 
@@ -275,9 +290,25 @@ async function init() {
         window.location.href = "/app.html";
       }
     });
+
+    if (viewerIsModerator) {
+      modEditBtn.style.display = "inline-flex";
+      modEditBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          requestExpandedMode(event as unknown as MouseEvent, "edit");
+        } catch {
+          window.location.href = "/app.html?mode=edit";
+        }
+      });
+    } else {
+      modEditBtn.style.display = "none";
+    }
+
     if (postData.images.length > 1) imageNav.style.display = "flex";
     updateImageNav();
-    loadCurrentImage();
+    loadCurrentImage(false);
 
     if (canVoteOnCurrentPost()) {
       eloEl.style.display = "";
@@ -342,7 +373,7 @@ async function refreshPostState() {
     updateImageNav();
     const nextImageUrl = currentImage()?.imageUrl ?? null;
     if (nextImageUrl && nextImageUrl !== currentImageUrl) {
-      loadCurrentImage();
+      loadCurrentImage(false);
     } else {
       layoutBadges();
     }
@@ -351,21 +382,188 @@ async function refreshPostState() {
   }
 }
 
-function loadCurrentImage() {
+function loadCurrentImage(animate = true) {
   const image = currentImage();
   if (!image) return;
   lastBadgeLayoutKey = "";
-  badgesEl.innerHTML = "";
+  const directionForAnimation = imageSlideDirection;
+  const snapshotForAnimation = pendingSlideSnapshot;
+  pendingSlideSnapshot = null;
+  const shouldAnimate =
+    animate &&
+    !!directionForAnimation &&
+    !!canvasImg.src &&
+    !!postData &&
+    postData.images.length > 1;
+
   const token = ++imageLoadToken;
-  canvasImg.onload = () => {
+
+  const finalizeLoadedImage = () => {
     if (token !== imageLoadToken) return;
+    canvasImg.src = image.imageUrl;
     layoutBadges(true);
     requestAnimationFrame(() => {
       if (token !== imageLoadToken) return;
       layoutBadges(true);
+      if (shouldAnimate && directionForAnimation) {
+        playSlideAnimation(directionForAnimation, snapshotForAnimation);
+      } else {
+        completeNavigationTransition();
+      }
     });
+    imageSlideDirection = null;
   };
-  canvasImg.src = image.imageUrl;
+
+  const imageUrl = image.imageUrl;
+  const currentUrl = canvasImg.currentSrc || canvasImg.src;
+  if (currentUrl && currentUrl === imageUrl) {
+    finalizeLoadedImage();
+    return;
+  }
+
+  const preloader = new Image();
+  preloader.decoding = "async";
+  preloader.onload = finalizeLoadedImage;
+  preloader.onerror = finalizeLoadedImage;
+  preloader.src = imageUrl;
+}
+
+function playSlideAnimation(
+  direction: "prev" | "next",
+  snapshot: {
+    imageSrc: string;
+    badgesHtml: string;
+    badgesLeft: string;
+    badgesTop: string;
+    badgesWidth: string;
+    badgesHeight: string;
+  } | null,
+): void {
+  const travelPx = Math.max(
+    1,
+    canvasEl.clientWidth || canvasEl.getBoundingClientRect().width || 1,
+  );
+  const incomingFromX = direction === "next" ? travelPx : -travelPx;
+  const outgoingToX = direction === "next" ? -travelPx : travelPx;
+  const durationMs = PAGE_SLIDE_DURATION_MS;
+  const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+  let ghostImg: HTMLImageElement | null = null;
+  let ghostBadges: HTMLDivElement | null = null;
+
+  if (snapshot?.imageSrc) {
+    ghostImg = document.createElement("img");
+    ghostImg.className = "canvas-img";
+    ghostImg.src = snapshot.imageSrc;
+    ghostImg.style.position = "absolute";
+    ghostImg.style.inset = "0";
+    ghostImg.style.zIndex = "2";
+    ghostImg.style.transform = "translateX(0)";
+    ghostImg.style.pointerEvents = "none";
+
+    ghostBadges = document.createElement("div");
+    ghostBadges.className = "badges";
+    ghostBadges.style.left = snapshot.badgesLeft;
+    ghostBadges.style.top = snapshot.badgesTop;
+    ghostBadges.style.width = snapshot.badgesWidth;
+    ghostBadges.style.height = snapshot.badgesHeight;
+    ghostBadges.style.zIndex = "3";
+    ghostBadges.style.pointerEvents = "none";
+    ghostBadges.innerHTML = snapshot.badgesHtml;
+
+    canvasEl.appendChild(ghostImg);
+    canvasEl.appendChild(ghostBadges);
+  }
+
+  const incomingElements = [canvasImg, badgesEl];
+  const outgoingElements: HTMLElement[] = [];
+  if (ghostImg) outgoingElements.push(ghostImg);
+  if (ghostBadges) outgoingElements.push(ghostBadges);
+
+  for (const element of incomingElements) {
+    element.style.transition = "none";
+    element.style.transform = `translateX(${incomingFromX}px)`;
+    void element.offsetWidth;
+  }
+
+  for (const element of outgoingElements) {
+    element.style.transition = "none";
+    element.style.transform = "translateX(0)";
+    void element.offsetWidth;
+  }
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      for (const element of incomingElements) {
+        element.style.transition = `transform ${durationMs}ms ${easing}`;
+        element.style.transform = "translateX(0)";
+      }
+      for (const element of outgoingElements) {
+        element.style.transition = `transform ${durationMs}ms ${easing}`;
+        element.style.transform = `translateX(${outgoingToX}px)`;
+      }
+    });
+  });
+
+  window.setTimeout(() => {
+    for (const element of incomingElements) {
+      element.style.transition = "";
+      element.style.transform = "";
+    }
+    ghostImg?.remove();
+    ghostBadges?.remove();
+    completeNavigationTransition();
+  }, durationMs + 40);
+}
+
+function navigateToImage(nextIndex: number): void {
+  if (!postData) return;
+  if (
+    nextIndex < 0 ||
+    nextIndex >= postData.images.length ||
+    nextIndex === activeImageIndex
+  ) {
+    return;
+  }
+  if (navTransitionInFlight) {
+    queuedNavIndex = nextIndex;
+    return;
+  }
+  startNavigationTo(nextIndex);
+}
+
+function startNavigationTo(nextIndex: number): void {
+  navTransitionInFlight = true;
+
+  pendingSlideSnapshot = {
+    imageSrc: canvasImg.currentSrc || canvasImg.src,
+    badgesHtml: badgesEl.innerHTML,
+    badgesLeft: badgesEl.style.left,
+    badgesTop: badgesEl.style.top,
+    badgesWidth: badgesEl.style.width,
+    badgesHeight: badgesEl.style.height,
+  };
+
+  imageSlideDirection = nextIndex > activeImageIndex ? "next" : "prev";
+  activeImageIndex = nextIndex;
+  markUserInteraction();
+  updateImageNav();
+  loadCurrentImage(true);
+}
+
+function completeNavigationTransition(): void {
+  navTransitionInFlight = false;
+  if (!postData) return;
+  const queued = queuedNavIndex;
+  queuedNavIndex = null;
+  if (
+    queued !== null &&
+    queued !== activeImageIndex &&
+    queued >= 0 &&
+    queued < postData.images.length
+  ) {
+    startNavigationTo(queued);
+  }
 }
 
 function updateImageNav() {
@@ -380,23 +578,20 @@ function updateImageNav() {
     if (index === activeImageIndex) dot.classList.add("active");
     imgDots.appendChild(dot);
   }
-  imgPrev.style.display = activeImageIndex > 0 ? "inline-flex" : "none";
-  imgNext.style.display =
-    activeImageIndex < postData.images.length - 1 ? "inline-flex" : "none";
+  imgPrev.style.display = hasMultiple ? "inline-flex" : "none";
+  imgNext.style.display = hasMultiple ? "inline-flex" : "none";
+  imgPrev.disabled = !hasMultiple || activeImageIndex <= 0;
+  imgNext.disabled =
+    !hasMultiple || activeImageIndex >= postData.images.length - 1;
 }
 
 imgPrev.addEventListener("click", () => {
-  if (!postData || activeImageIndex <= 0) return;
-  activeImageIndex -= 1;
-  updateImageNav();
-  loadCurrentImage();
+  navigateToImage(activeImageIndex - 1);
 });
 
 imgNext.addEventListener("click", () => {
-  if (!postData || activeImageIndex >= postData.images.length - 1) return;
-  activeImageIndex += 1;
-  updateImageNav();
-  loadCurrentImage();
+  if (!postData) return;
+  navigateToImage(activeImageIndex + 1);
 });
 
 canvasEl.addEventListener("click", (event) => {
@@ -408,6 +603,7 @@ canvasEl.addEventListener("click", (event) => {
     target.closest(".badge") ||
     target.closest(".img-nav-btn") ||
     target.closest("#quick-create") ||
+    target.closest("#mod-edit") ||
     target.closest("#badge-vis-toggle") ||
     target.closest(".image-nav")
   ) {
@@ -454,7 +650,8 @@ function layoutBadges(force = false) {
     const c = consensus[p.id];
     const uv = userVotes[p.id];
     const hasConsensus =
-      c && c.totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS && c.classification;
+      !!c?.classification && c.totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS;
+    const showLiveOpacity = pd.mode === "vote" && isVotingWindowOpen();
 
     if (pd.mode === "annotated" && p.classification) {
       el.classList.add("badge--voted");
@@ -469,6 +666,10 @@ function layoutBadges(force = false) {
       }
 
       if (pd.mode === "vote") {
+        if (showLiveOpacity) {
+          el.classList.add("badge--live-window");
+        }
+
         if (!uv && canVoteOnCurrentPost()) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
