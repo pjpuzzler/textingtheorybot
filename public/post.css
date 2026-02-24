@@ -65,8 +65,7 @@ body {
   pointer-events: none;
   transform: translateX(0);
   opacity: 1;
-  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s
-    ease;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
 }
 
 .canvas-img.slide-from-right {
@@ -89,8 +88,7 @@ body {
   inset: 0;
   transform: translateX(0);
   opacity: 1;
-  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s
-    ease;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
 }
 
 .badges.slide-from-right {

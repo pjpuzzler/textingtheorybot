@@ -483,7 +483,10 @@ async function onInit(): Promise<InitResponse> {
   };
 }
 
-async function removeVotesForBadge(postId: string, badgeId: string): Promise<void> {
+async function removeVotesForBadge(
+  postId: string,
+  badgeId: string,
+): Promise<void> {
   await redis.del(votesKey(postId, badgeId));
 }
 

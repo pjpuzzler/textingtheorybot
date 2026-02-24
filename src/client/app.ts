@@ -184,7 +184,8 @@ async function initEditSessionIfRequested(): Promise<void> {
     isEditSession = true;
     mode = data.postData.mode;
     eloSide = data.postData.eloSide ?? "right";
-    meChecked = data.postData.eloSide === "me" || data.postData.eloSide === "right";
+    meChecked =
+      data.postData.eloSide === "me" || data.postData.eloSide === "right";
 
     images = await Promise.all(
       data.postData.images.map((image) =>
@@ -198,7 +199,8 @@ async function initEditSessionIfRequested(): Promise<void> {
     detailsModal.classList.remove("open");
     openEditor();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to start edit mode";
+    const message =
+      err instanceof Error ? err.message : "Failed to start edit mode";
     alert(message);
     window.location.href = "/";
   } finally {
@@ -1173,7 +1175,9 @@ async function submitEditSession(): Promise<void> {
   isSubmitting = true;
 
   try {
-    const payloadImages = await Promise.all(images.map((img) => flattenVoteImage(img)));
+    const payloadImages = await Promise.all(
+      images.map((img) => flattenVoteImage(img)),
+    );
     const body: UpdatePostRequest = {
       images: payloadImages,
     };
