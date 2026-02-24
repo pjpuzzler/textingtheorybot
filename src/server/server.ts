@@ -162,6 +162,8 @@ async function onAppInstall(): Promise<{
     subredditName,
     title: "Create Texting Theory Post",
     postData: { v: 1 },
+    // app is the author of the create factory post pinned to the top of the subreddit
+    // every actual post is created via runAs: USER in accordance with Devvit guidelines
     runAs: "APP",
   });
 
