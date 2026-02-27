@@ -881,7 +881,9 @@ async function updatePostFlair(
     const visibleEloText = showVisibleElo ? `${elo} Elo` : "??? Elo";
     const formattedVoteCount = voteCount.toLocaleString("en-US");
     const flairText = includeVoteCount
-      ? `${visibleEloText} (${formattedVoteCount} ${voteCount === 1 ? "Vote" : "Votes"})`
+      ? `${visibleEloText} (${formattedVoteCount} ${
+          voteCount === 1 ? "Vote" : "Votes"
+        })`
       : visibleEloText;
     const bgColor = getEloColor(elo);
     const subredditName = context.subredditName;
