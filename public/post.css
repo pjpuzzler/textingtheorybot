@@ -301,14 +301,18 @@ body {
   cursor: pointer;
 }
 
-.badge--voted {
+.badge-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
 }
 
-.badge--live-window {
-  opacity: 0.9;
+.badge-face--unlocked {
+  filter: saturate(67%);
 }
 
 .badge--placeholder,

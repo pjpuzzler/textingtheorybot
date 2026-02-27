@@ -38,8 +38,10 @@ type EditorImage = {
 };
 
 const MAX_IMAGE_DIM = 2048;
-const VOTE_MIN_RADIUS = 4;
-const ANNOTATED_MIN_RADIUS = 2;
+const VOTE_MIN_RADIUS = 3;
+const VOTE_MAX_RADIUS = 7;
+const ANNOTATED_MIN_RADIUS = 3;
+const ANNOTATED_MAX_RADIUS = 7;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 150;
@@ -220,14 +222,22 @@ function sliderMinForMode(): number {
   return mode === "annotated" ? ANNOTATED_MIN_RADIUS : VOTE_MIN_RADIUS;
 }
 
+function sliderMaxForMode(): number {
+  return mode === "annotated" ? ANNOTATED_MAX_RADIUS : VOTE_MAX_RADIUS;
+}
+
 function applySliderBoundsForMode(): void {
   const min = sliderMinForMode();
+  const max = sliderMaxForMode();
   cmSize.min = String(min);
+  cmSize.max = String(max);
   const current = Number(cmSize.value) || globalRadius;
   if (current < min) {
     cmSize.value = String(min);
+  } else if (current > max) {
+    cmSize.value = String(max);
   }
-  globalRadius = Number(cmSize.value) || min;
+  globalRadius = Number(cmSize.value) || Math.min(max, Math.max(min, 6));
 }
 
 function editorBoxSize(): { width: number; height: number } {
@@ -1251,19 +1261,27 @@ cmPost.addEventListener("click", async () => {
     }
 
     if (effectiveSide === "other") {
-      const txt = sanitizeOtherEloLabel(otherInput.value.trim());
+      const txtRaw = sanitizeOtherEloLabel(otherInput.value.trim());
+      const isMeAlias = /^me$/i.test(txtRaw);
+      if (isMeAlias) {
+        otherInput.value = "Me";
+        meChecked = true;
+        effectiveSide = "me";
+      }
+
+      const txt = isMeAlias ? "Me" : txtRaw;
       otherInput.value = txt;
-      if (!txt) {
+      if (!isMeAlias && !txt) {
         alert("Enter who this Elo vote should target (letters only).");
         otherInput.focus();
         return;
       }
-      if (!OTHER_ELO_LABEL_REGEX.test(txt)) {
+      if (!isMeAlias && !OTHER_ELO_LABEL_REGEX.test(txt)) {
         alert("Other target must be letters only, max 16 characters.");
         otherInput.focus();
         return;
       }
-      eloOtherText = txt;
+      eloOtherText = isMeAlias ? undefined : txt;
     }
 
     if (!title.startsWith("[")) {

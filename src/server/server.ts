@@ -591,10 +591,15 @@ async function onCreatePost(
 
   if (body.mode === "vote" && body.eloSide === "other") {
     const other = (body.eloOtherText ?? "").trim();
-    if (!OTHER_ELO_LABEL_REGEX.test(other)) {
-      throw new Error("Other vote target must be letters only (max 16)");
+    if (/^me$/i.test(other)) {
+      body.eloSide = "me";
+      body.eloOtherText = undefined;
+    } else {
+      if (!OTHER_ELO_LABEL_REGEX.test(other)) {
+        throw new Error("Other vote target must be letters only (max 16)");
+      }
+      body.eloOtherText = other;
     }
-    body.eloOtherText = other;
   }
 
   if (!body.images?.length) throw new Error("At least one image is required");
@@ -865,17 +870,19 @@ async function updatePostFlair(
     showVisibleElo?: boolean;
     colorize?: boolean;
     tryUserFlair?: boolean;
+    includeVoteCount?: boolean;
   },
 ): Promise<void> {
   try {
     const showVisibleElo = options?.showVisibleElo ?? false;
     const colorize = options?.colorize ?? false;
     const shouldTryUserFlair = options?.tryUserFlair ?? false;
+    const includeVoteCount = options?.includeVoteCount ?? true;
     const visibleEloText = showVisibleElo ? `${elo} Elo` : "??? Elo";
     const formattedVoteCount = voteCount.toLocaleString("en-US");
-    const flairText = `${visibleEloText} (${formattedVoteCount} ${
-      voteCount === 1 ? "Vote" : "Votes"
-    })`;
+    const flairText = includeVoteCount
+      ? `${visibleEloText} (${formattedVoteCount} ${voteCount === 1 ? "Vote" : "Votes"})`
+      : visibleEloText;
     const bgColor = getEloColor(elo);
     const subredditName = context.subredditName;
     if (!subredditName) return;
@@ -915,7 +922,7 @@ async function finalizeEloIfTimedOut(
   if (isVoteWindowOpen(postData)) return;
 
   const finalized = await redis.get(eloFinalizedKey(postId));
-  if (finalized === "1") return;
+  const alreadyFinalized = finalized === "1";
 
   const allEloRaw = await redis.get(eloVotesKey(postId));
   const eloArr = allEloRaw ? (JSON.parse(allEloRaw) as number[]) : [];
@@ -932,7 +939,8 @@ async function finalizeEloIfTimedOut(
   await updatePostFlair(postId, consensusElo, voteCount, {
     showVisibleElo: true,
     colorize: showVisibleElo,
-    tryUserFlair: showVisibleElo,
+    tryUserFlair: showVisibleElo && !alreadyFinalized,
+    includeVoteCount: false,
   });
 
   await redis.set(eloFinalizedKey(postId), "1");

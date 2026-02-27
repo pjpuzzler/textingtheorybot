@@ -72,6 +72,8 @@ const pickerOvl = $("picker-overlay") as HTMLDivElement;
 const pickerBg = $("picker-bg") as HTMLDivElement;
 const pickerTitle = $("picker-title") as HTMLDivElement;
 const pickerBody = $("picker-body") as HTMLDivElement;
+const query = new URLSearchParams(window.location.search);
+const isExpandedView = query.get("expanded") === "1";
 
 function badgeAsset(cls: Classification): string {
   return `/assets/badges/${cls.toLowerCase()}.png`;
@@ -290,6 +292,9 @@ async function init() {
         window.location.href = "/app.html";
       }
     });
+    if (isExpandedView) {
+      quickCreateBtn.style.display = "none";
+    }
 
     if (viewerIsModerator) {
       modEditBtn.style.display = "inline-flex";
@@ -610,9 +615,9 @@ canvasEl.addEventListener("click", (event) => {
     return;
   }
   try {
-    requestExpandedMode(event as unknown as MouseEvent, "default");
+    requestExpandedMode(event as unknown as MouseEvent, "expanded");
   } catch {
-    // no-op fallback
+    window.location.href = "/post.html?expanded=1";
   }
 });
 
@@ -651,25 +656,32 @@ function layoutBadges(force = false) {
     const uv = userVotes[p.id];
     const hasConsensus =
       !!c?.classification && c.totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS;
-    const showLiveOpacity = pd.mode === "vote" && isVotingWindowOpen();
+    const isLiveVoteWindow = pd.mode === "vote" && isVotingWindowOpen();
+    let badgeImageUrl: string | null = null;
 
     if (pd.mode === "annotated" && p.classification) {
       el.classList.add("badge--voted");
-      el.style.backgroundImage = `url(${badgeAsset(p.classification)})`;
+      badgeImageUrl = badgeAsset(p.classification);
     } else {
       if (hasConsensus) {
         el.classList.add("badge--voted");
-        el.style.backgroundImage = `url(${badgeAsset(c!.classification!)})`;
+        badgeImageUrl = badgeAsset(c!.classification!);
       } else {
         el.classList.add("badge--placeholder");
-        el.style.backgroundImage = `url(${unknownBadgeAsset()})`;
+        badgeImageUrl = unknownBadgeAsset();
+      }
+
+      if (badgeImageUrl) {
+        const faceEl = document.createElement("div");
+        faceEl.className = "badge-face";
+        if (isLiveVoteWindow) {
+          faceEl.classList.add("badge-face--unlocked");
+        }
+        faceEl.style.backgroundImage = `url(${badgeImageUrl})`;
+        el.appendChild(faceEl);
       }
 
       if (pd.mode === "vote") {
-        if (showLiveOpacity) {
-          el.classList.add("badge--live-window");
-        }
-
         if (!uv && canVoteOnCurrentPost()) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
@@ -687,6 +699,13 @@ function layoutBadges(force = false) {
           el.appendChild(voteEl);
         }
       }
+    }
+
+    if (pd.mode === "annotated" && badgeImageUrl) {
+      const faceEl = document.createElement("div");
+      faceEl.className = "badge-face";
+      faceEl.style.backgroundImage = `url(${badgeImageUrl})`;
+      el.appendChild(faceEl);
     }
 
     if (pd.mode === "vote" && canVoteOnCurrentPost()) {

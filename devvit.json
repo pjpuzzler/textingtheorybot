@@ -15,6 +15,9 @@
         "inline": true,
         "entry": "post.html"
       },
+      "expanded": {
+        "entry": "post.html?expanded=1"
+      },
       "create": {
         "entry": "app.html"
       },

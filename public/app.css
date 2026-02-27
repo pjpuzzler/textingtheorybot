@@ -306,13 +306,14 @@ html.tt-edit-boot #overlay-submit {
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.68);
   color: #ddd;
-  font-size: 11px;
+  font-size: 14px;
   padding: 7px 12px;
   border-radius: 14px;
   transition: opacity 0.2s;
   text-align: center;
-  width: min(75vw, 560px);
-  max-width: min(75vw, 560px);
+  line-height: 20px;
+  width: min(95vw, 375px);
+  max-width: min(95vw, 375px);
 }
 
 .hint.hidden {
@@ -366,7 +367,6 @@ html.tt-edit-boot #overlay-submit {
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  opacity: 0.9;
 }
 
 .ed-badge--vote.selected {
