@@ -519,7 +519,9 @@ async function onInit(): Promise<InitResponse> {
 
   if (postData) {
     const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
-      userId ? redis.hGetAll(userVotesKey(postId, userId)) : Promise.resolve({}),
+      userId
+        ? redis.hGetAll(userVotesKey(postId, userId))
+        : Promise.resolve({}),
       userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
       redis.get(eloVotesKey(postId)),
     ]);
