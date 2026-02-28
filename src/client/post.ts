@@ -356,12 +356,12 @@ async function init() {
     console.error("Init failed:", err);
     loadingEl.style.display = "none";
     createPrompt.style.display = "flex";
-    const titleEl = createPrompt.querySelector(".create-title") as
-      | HTMLDivElement
-      | null;
-    const descEl = createPrompt.querySelector(".create-desc") as
-      | HTMLDivElement
-      | null;
+    const titleEl = createPrompt.querySelector(
+      ".create-title",
+    ) as HTMLDivElement | null;
+    const descEl = createPrompt.querySelector(
+      ".create-desc",
+    ) as HTMLDivElement | null;
     if (titleEl) titleEl.textContent = "Post unavailable";
     if (descEl) {
       descEl.textContent = "Load failed. Tap retry.";

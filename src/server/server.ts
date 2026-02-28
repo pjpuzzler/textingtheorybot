@@ -460,12 +460,18 @@ async function onInit(): Promise<InitResponse> {
     await finalizeEloIfTimedOut(postId, postData);
 
     const voteWindowOpen = isVoteWindowOpen(postData);
-    const placementList = getAllPlacements(postData).map(({ placement }) => placement);
+    const placementList = getAllPlacements(postData).map(
+      ({ placement }) => placement,
+    );
     const consensusEntries = await Promise.all(
       placementList.map(async (placement) => {
         const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
         const computed = computeBadgeConsensus(allVotes);
-        if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+        if (
+          !voteWindowOpen &&
+          !computed.classification &&
+          computed.totalVotes > 0
+        ) {
           computed.classification = iqmToClassification(
             computed.iqm,
             computed.voteCounts,
