@@ -496,7 +496,7 @@ function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
 // ============================
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
-  const userId = getUserId();
+  const userId = context.userId ?? "";
   const currentUsername = await reddit.getCurrentUsername();
   const username = currentUsername ?? "unknown";
   const isModerator = await isCurrentUserModerator(currentUsername);
@@ -519,8 +519,8 @@ async function onInit(): Promise<InitResponse> {
 
   if (postData) {
     const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
-      redis.hGetAll(userVotesKey(postId, userId)),
-      redis.get(userEloKey(postId, userId)),
+      userId ? redis.hGetAll(userVotesKey(postId, userId)) : Promise.resolve({}),
+      userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
       redis.get(eloVotesKey(postId)),
     ]);
 

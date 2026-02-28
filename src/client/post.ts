@@ -24,6 +24,7 @@ let userElo: number | null = null;
 let lastSubmittedElo: number | null = null;
 let activeImageIndex = 0;
 let viewerUserId = "";
+let viewerIsLoggedIn = false;
 let viewerIsModerator = false;
 let refreshTimer: number | null = null;
 let imageLoadToken = 0;
@@ -167,6 +168,7 @@ function isVotingWindowOpen(): boolean {
 
 function canVoteOnCurrentPost(): boolean {
   return (
+    viewerIsLoggedIn &&
     !!postData &&
     postData.mode === "vote" &&
     !isOwnPost() &&
@@ -265,10 +267,14 @@ function applyEloTrackVisuals(): void {
 async function init() {
   try {
     let res: Response;
-    try {
-      res = await fetchInitWithTimeout(isExpandedView ? 9000 : 4500);
-    } catch {
-      res = await fetchInitWithTimeout(isExpandedView ? 12000 : 6500);
+    if (isExpandedView) {
+      try {
+        res = await fetchInitWithTimeout(9000);
+      } catch {
+        res = await fetchInitWithTimeout(12000);
+      }
+    } else {
+      res = await fetchInitWithTimeout(10000);
     }
     if (!res.ok) {
       throw new Error(`Init failed with ${res.status}`);
@@ -281,6 +287,7 @@ async function init() {
     userElo = data.userElo;
     lastSubmittedElo = userElo;
     viewerUserId = data.userId;
+    viewerIsLoggedIn = !!data.userId;
     viewerIsModerator = !!data.isModerator;
 
     loadingEl.style.display = "none";
@@ -340,8 +347,8 @@ async function init() {
       setupElo();
     }
 
-    if (refreshTimer === null) {
-      const refreshMs = isExpandedView ? 6000 : 30000;
+    if (refreshTimer === null && isExpandedView) {
+      const refreshMs = 6000;
       refreshTimer = window.setInterval(() => {
         void refreshPostState();
       }, refreshMs);
