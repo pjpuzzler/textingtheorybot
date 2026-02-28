@@ -77,6 +77,16 @@ let pendingCreateSlideBadges: {
 let navTransitionInFlight = false;
 let queuedNavIndex: number | null = null;
 let isEditSession = false;
+let editorLayoutRaf: number | null = null;
+
+function scheduleEditorLayoutRefresh(): void {
+  if (editorLayoutRaf !== null) return;
+  editorLayoutRaf = window.requestAnimationFrame(() => {
+    editorLayoutRaf = null;
+    if (!images.length) return;
+    render();
+  });
+}
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -426,13 +436,24 @@ function openEditor() {
   //     mode === "annotated"
   //       ? "Tap to place a badge by every relevant message. Don't cover anything important."
   //       : "Tap to place a badge by every relevant message. Don't cover anything important.";
-  syncPlacementRadiiFromSlider();
+  if (isEditSession) {
+    hintEl.style.display = "none";
+  } else {
+    hintEl.style.display = "";
+  }
+  if (!isEditSession) {
+    syncPlacementRadiiFromSlider();
+  }
   updateSideUI();
   loadActiveImage(false);
+  scheduleEditorLayoutRefresh();
+  window.requestAnimationFrame(() => scheduleEditorLayoutRefresh());
+  window.setTimeout(() => scheduleEditorLayoutRefresh(), 120);
 }
 
 function updateMarkerToggleUI(): void {
   cmMarkerToggle.classList.toggle("active", markerModeEnabled);
+  cmCanvasWrap.classList.toggle("marker-mode", markerModeEnabled);
   cmMarkerToggle.setAttribute(
     "aria-label",
     markerModeEnabled ? "Disable redaction marker" : "Enable redaction marker",
@@ -1130,6 +1151,10 @@ cmSize.addEventListener("input", () => {
   render();
 });
 
+cmImg.addEventListener("load", () => {
+  scheduleEditorLayoutRefresh();
+});
+
 cmNext.addEventListener("click", () => {
   if (cmNext.disabled) return;
   if (isEditSession) {
@@ -1564,9 +1589,15 @@ pickerBg.addEventListener("click", (event) => {
   closePicker();
 });
 window.addEventListener("resize", () => {
-  syncPlacementRadiiFromSlider();
-  render();
+  scheduleEditorLayoutRefresh();
 });
+
+if (typeof ResizeObserver !== "undefined") {
+  const editorResizeObserver = new ResizeObserver(() => {
+    scheduleEditorLayoutRefresh();
+  });
+  editorResizeObserver.observe(cmCanvasWrap);
+}
 
 updateNextEnabled();
 

@@ -43,6 +43,7 @@ let pendingSlideSnapshot: {
 } | null = null;
 let navTransitionInFlight = false;
 let queuedNavIndex: number | null = null;
+let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
 
@@ -86,6 +87,16 @@ async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+function schedulePostLayoutRefresh(): void {
+  if (postLayoutRaf !== null) return;
+  postLayoutRaf = window.requestAnimationFrame(() => {
+    postLayoutRaf = null;
+    layoutBadges(true);
+    applyEloTrackVisuals();
+    updateGmTickPosition();
+  });
 }
 
 function badgeAsset(cls: Classification): string {
@@ -769,6 +780,17 @@ function layoutBadges(force = false) {
 
 window.addEventListener("resize", () => layoutBadges(true));
 
+canvasImg.addEventListener("load", () => {
+  schedulePostLayoutRefresh();
+});
+
+if (typeof ResizeObserver !== "undefined") {
+  const postResizeObserver = new ResizeObserver(() => {
+    schedulePostLayoutRefresh();
+  });
+  postResizeObserver.observe(canvasEl);
+}
+
 let activeHintEl: HTMLDivElement | null = null;
 
 function isBookValidForVote(p: BadgePlacement): boolean {
@@ -1036,8 +1058,7 @@ function updateEloDisplay() {
 
 eloSlider.addEventListener("input", updateEloDisplay);
 window.addEventListener("resize", () => {
-  applyEloTrackVisuals();
-  updateGmTickPosition();
+  schedulePostLayoutRefresh();
 });
 
 eloBtn.addEventListener("click", async () => {

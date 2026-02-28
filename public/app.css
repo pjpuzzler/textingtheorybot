@@ -361,6 +361,11 @@ html.tt-edit-boot #overlay-submit {
   touch-action: none;
 }
 
+.cm-canvas-wrap.marker-mode .ed-badge,
+.cm-canvas-wrap.marker-mode .ed-del {
+  pointer-events: none;
+}
+
 .ed-badge--vote {
   border: none;
   background-image: url(/assets/badges/unknown.png);
