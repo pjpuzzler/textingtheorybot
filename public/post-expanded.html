@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <link rel="stylesheet" type="text/css" href="post.css" />
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0"
+    />
+    <title>Texting Theory</title>
+  </head>
+
+  <body>
+    <!-- Loading -->
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Main post view -->
+    <div class="post" id="post" style="display: none">
+      <div class="canvas" id="canvas">
+        <img class="canvas-img" id="canvas-img" alt="" />
+        <div class="badges" id="badges"></div>
+        <button class="quick-create" id="quick-create" aria-label="Create post">
+          +
+        </button>
+        <button
+          class="mod-edit"
+          id="mod-edit"
+          aria-label="Edit post"
+          style="display: none"
+        >
+          Edit
+        </button>
+        <button
+          class="badge-visibility"
+          id="badge-vis-toggle"
+          aria-label="Hide badges"
+        >
+          👁
+        </button>
+        <div class="page-chip" id="page-chip" style="display: none">1/1</div>
+        <div class="image-nav" id="image-nav" style="display: none">
+          <button class="img-nav-btn" id="img-prev">‹</button>
+          <div class="img-dots" id="img-dots"></div>
+          <button class="img-nav-btn" id="img-next">›</button>
+        </div>
+      </div>
+
+      <!-- ELO section -->
+      <div class="elo" id="elo" style="display: none">
+        <div class="elo-row">
+          <div class="elo-slider-wrap">
+            <input
+              type="range"
+              class="elo-slider"
+              id="elo-slider"
+              min="100"
+              max="3000"
+              step="50"
+              value="1000"
+            />
+            <div class="elo-tick" id="elo-gm-tick">GM</div>
+          </div>
+          <span class="elo-val" id="elo-val">1000 Elo</span>
+          <button class="elo-btn" id="elo-btn">Vote</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create placeholder (no post data) -->
+    <div class="create-prompt" id="create-prompt" style="display: none">
+      <img src="/assets/logo.png" alt="Texting Theory" class="create-logo" />
+      <div class="create-title">Texting Theory</div>
+      <button class="create-btn" id="create-btn">Create Post</button>
+    </div>
+
+    <!-- Classification Picker -->
+    <div class="picker-overlay" id="picker-overlay">
+      <div class="picker-bg" id="picker-bg"></div>
+      <div class="picker-sheet">
+        <div class="picker-handle"></div>
+        <div class="picker-title" id="picker-title">
+          Vote for Classification
+        </div>
+        <div class="picker-body" id="picker-body"></div>
+      </div>
+    </div>
+
+    <script type="module" src="post.js" defer></script>
+  </body>
+</html>

@@ -73,7 +73,19 @@ const pickerBg = $("picker-bg") as HTMLDivElement;
 const pickerTitle = $("picker-title") as HTMLDivElement;
 const pickerBody = $("picker-body") as HTMLDivElement;
 const query = new URLSearchParams(window.location.search);
-const isExpandedView = query.get("expanded") === "1";
+const isExpandedView =
+  query.get("expanded") === "1" ||
+  window.location.pathname.endsWith("/post-expanded.html");
+
+async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(ApiEndpoint.Init, { signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 function badgeAsset(cls: Classification): string {
   return `/assets/badges/${cls.toLowerCase()}.png`;
@@ -252,7 +264,15 @@ function applyEloTrackVisuals(): void {
 
 async function init() {
   try {
-    const res = await fetch(ApiEndpoint.Init);
+    let res: Response;
+    try {
+      res = await fetchInitWithTimeout(isExpandedView ? 9000 : 4500);
+    } catch {
+      res = await fetchInitWithTimeout(isExpandedView ? 12000 : 6500);
+    }
+    if (!res.ok) {
+      throw new Error(`Init failed with ${res.status}`);
+    }
     const data = (await res.json()) as InitResponse;
 
     postData = data.postData ? normalizePostData(data.postData) : null;
@@ -321,9 +341,10 @@ async function init() {
     }
 
     if (refreshTimer === null) {
+      const refreshMs = isExpandedView ? 6000 : 30000;
       refreshTimer = window.setInterval(() => {
         void refreshPostState();
-      }, 6000);
+      }, refreshMs);
       window.addEventListener("beforeunload", () => {
         if (refreshTimer !== null) {
           window.clearInterval(refreshTimer);
@@ -333,6 +354,20 @@ async function init() {
     }
   } catch (err) {
     console.error("Init failed:", err);
+    loadingEl.style.display = "none";
+    createPrompt.style.display = "flex";
+    const titleEl = createPrompt.querySelector(".create-title") as
+      | HTMLDivElement
+      | null;
+    const descEl = createPrompt.querySelector(".create-desc") as
+      | HTMLDivElement
+      | null;
+    if (titleEl) titleEl.textContent = "Post unavailable";
+    if (descEl) {
+      descEl.textContent = "Load failed. Tap retry.";
+    }
+    createBtn.textContent = "Retry";
+    createBtn.onclick = () => window.location.reload();
   }
 }
 

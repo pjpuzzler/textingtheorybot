@@ -16,13 +16,13 @@
         "entry": "post.html"
       },
       "expanded": {
-        "entry": "post.html?expanded=1"
+        "entry": "post-expanded.html"
       },
       "create": {
         "entry": "app.html"
       },
       "edit": {
-        "entry": "app.html?mode=edit"
+        "entry": "app-edit.html"
       }
     }
   },

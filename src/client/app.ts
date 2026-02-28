@@ -134,7 +134,8 @@ let suppressEditorPickerUntil = 0;
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const TITLE_FORBIDDEN_CHARS_REGEX = /[\[\]]/g;
 const query = new URLSearchParams(window.location.search);
-const isEditBootRequested = query.get("mode") === "edit";
+const isEditBootRequested =
+  query.get("mode") === "edit" || window.location.pathname.endsWith("/app-edit.html");
 
 if (isEditBootRequested) {
   screenMode.style.display = "none";

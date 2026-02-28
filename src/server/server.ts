@@ -50,6 +50,8 @@ const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
+const eloNoCountFlairAppliedKey = (pid: string) =>
+  `tt:elo:finalized-nocount:v1:${pid}`;
 
 // ============================
 // Entry point
@@ -216,11 +218,13 @@ async function assertCanCreatePost(): Promise<void> {
   }
 }
 
-async function isCurrentUserModerator(): Promise<boolean> {
+async function isCurrentUserModerator(
+  usernameOverride?: string | null,
+): Promise<boolean> {
   const subredditName = context.subredditName;
   if (!subredditName) return false;
 
-  const username = await reddit.getCurrentUsername();
+  const username = usernameOverride ?? (await reddit.getCurrentUsername());
   if (!username) return false;
 
   try {
@@ -413,8 +417,9 @@ function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
   const userId = getUserId();
-  const username = (await reddit.getCurrentUsername()) ?? "unknown";
-  const isModerator = await isCurrentUserModerator();
+  const currentUsername = await reddit.getCurrentUsername();
+  const username = currentUsername ?? "unknown";
+  const isModerator = await isCurrentUserModerator(currentUsername);
 
   let postData: PostData | null = null;
   try {
@@ -427,46 +432,52 @@ async function onInit(): Promise<InitResponse> {
   const consensus: Record<string, BadgeConsensus> = {};
   const userVotes: Record<string, Classification> = {};
 
-  if (postData) {
-    await finalizeEloIfTimedOut(postId, postData);
-
-    const uvRaw = await redis.hGetAll(userVotesKey(postId, userId));
-    for (const [bid, cls] of Object.entries(uvRaw)) {
-      userVotes[bid] = cls as Classification;
-    }
-
-    for (const { placement } of getAllPlacements(postData)) {
-      const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
-      const computed = computeBadgeConsensus(allVotes);
-      if (
-        !isVoteWindowOpen(postData) &&
-        !computed.classification &&
-        computed.totalVotes > 0
-      ) {
-        computed.classification = iqmToClassification(
-          computed.iqm,
-          computed.voteCounts,
-          computed.totalVotes,
-        );
-      }
-      consensus[placement.id] = computed;
-    }
-  }
-
   // ELO
   let userElo: number | null = null;
   let consensusElo: number | null = null;
   let eloVoteCount = 0;
 
-  const userEloRaw = await redis.get(userEloKey(postId, userId));
-  if (userEloRaw) userElo = Number(userEloRaw);
+  const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
+    redis.hGetAll(userVotesKey(postId, userId)),
+    redis.get(userEloKey(postId, userId)),
+    redis.get(eloVotesKey(postId)),
+  ]);
 
-  const allEloRaw = await redis.get(eloVotesKey(postId));
+  for (const [bid, cls] of Object.entries(uvRaw)) {
+    userVotes[bid] = cls as Classification;
+  }
+
+  if (userEloRaw) userElo = Number(userEloRaw);
   if (allEloRaw) {
     const eloArr = JSON.parse(allEloRaw) as number[];
     eloVoteCount = eloArr.length;
     if (eloArr.length > 0) {
       consensusElo = Math.round(interquartileMean(eloArr));
+    }
+  }
+
+  if (postData) {
+    await finalizeEloIfTimedOut(postId, postData);
+
+    const voteWindowOpen = isVoteWindowOpen(postData);
+    const placementList = getAllPlacements(postData).map(({ placement }) => placement);
+    const consensusEntries = await Promise.all(
+      placementList.map(async (placement) => {
+        const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+        const computed = computeBadgeConsensus(allVotes);
+        if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+          computed.classification = iqmToClassification(
+            computed.iqm,
+            computed.voteCounts,
+            computed.totalVotes,
+          );
+        }
+        return [placement.id, computed] as const;
+      }),
+    );
+
+    for (const [placementId, computed] of consensusEntries) {
+      consensus[placementId] = computed;
     }
   }
 
@@ -924,7 +935,12 @@ async function finalizeEloIfTimedOut(
   if (isVoteWindowOpen(postData)) return;
 
   const finalized = await redis.get(eloFinalizedKey(postId));
+  const noCountApplied =
+    (await redis.get(eloNoCountFlairAppliedKey(postId))) === "1";
   const alreadyFinalized = finalized === "1";
+  if (alreadyFinalized && noCountApplied) {
+    return;
+  }
 
   const allEloRaw = await redis.get(eloVotesKey(postId));
   const eloArr = allEloRaw ? (JSON.parse(allEloRaw) as number[]) : [];
@@ -932,6 +948,7 @@ async function finalizeEloIfTimedOut(
 
   if (voteCount < MIN_VOTES_FOR_POST_FLAIR) {
     await redis.set(eloFinalizedKey(postId), "1");
+    await redis.set(eloNoCountFlairAppliedKey(postId), "1");
     return;
   }
 
@@ -946,6 +963,7 @@ async function finalizeEloIfTimedOut(
   });
 
   await redis.set(eloFinalizedKey(postId), "1");
+  await redis.set(eloNoCountFlairAppliedKey(postId), "1");
 }
 
 async function tryUpdateUserFlair(
