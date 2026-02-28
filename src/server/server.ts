@@ -95,7 +95,10 @@ async function writeConsensusCache(
 ): Promise<void> {
   const expiresAt = Date.now() + CONSENSUS_CACHE_TTL_MS;
   await Promise.all([
-    redis.set(consensusCacheKey(postId, voteWindowOpen), JSON.stringify(consensus)),
+    redis.set(
+      consensusCacheKey(postId, voteWindowOpen),
+      JSON.stringify(consensus),
+    ),
     redis.set(
       consensusCacheMetaKey(postId, voteWindowOpen),
       JSON.stringify({ expiresAt }),
@@ -277,12 +280,18 @@ async function isCurrentUserModerator(
   const username = usernameOverride ?? (await reddit.getCurrentUsername());
   if (!username) return false;
 
-   const cacheKey = moderatorCacheKey(subredditName, username);
+  const cacheKey = moderatorCacheKey(subredditName, username);
   const cached = await redis.get(cacheKey);
   if (cached) {
     try {
-      const parsed = JSON.parse(cached) as { value: boolean; expiresAt: number };
-      if (typeof parsed.expiresAt === "number" && parsed.expiresAt > Date.now()) {
+      const parsed = JSON.parse(cached) as {
+        value: boolean;
+        expiresAt: number;
+      };
+      if (
+        typeof parsed.expiresAt === "number" &&
+        parsed.expiresAt > Date.now()
+      ) {
         return !!parsed.value;
       }
     } catch {
@@ -541,7 +550,9 @@ async function onInit(): Promise<InitResponse> {
         );
         const consensusEntries = await Promise.all(
           placementList.map(async (placement) => {
-            const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+            const allVotes = await redis.hGetAll(
+              votesKey(postId, placement.id),
+            );
             const computed = computeBadgeConsensus(allVotes);
             if (
               !voteWindowOpen &&
