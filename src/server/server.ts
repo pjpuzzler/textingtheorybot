@@ -40,6 +40,8 @@ const MIN_VOTER_TOTAL_KARMA = 10;
 const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
 const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
+const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
+const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
 
 // ============================
 // Redis key helpers
@@ -52,6 +54,54 @@ const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 const eloNoCountFlairAppliedKey = (pid: string) =>
   `tt:elo:finalized-nocount:v1:${pid}`;
+const moderatorCacheKey = (subredditName: string, username: string) =>
+  `tt:moderator:${subredditName}:${username}`;
+const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
+  `tt:consensus:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
+  `tt:consensus-meta:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+
+async function clearConsensusCache(postId: string): Promise<void> {
+  await redis.del(consensusCacheKey(postId, true));
+  await redis.del(consensusCacheKey(postId, false));
+  await redis.del(consensusCacheMetaKey(postId, true));
+  await redis.del(consensusCacheMetaKey(postId, false));
+}
+
+async function readConsensusCache(
+  postId: string,
+  voteWindowOpen: boolean,
+): Promise<Record<string, BadgeConsensus> | null> {
+  const [rawConsensus, rawMeta] = await Promise.all([
+    redis.get(consensusCacheKey(postId, voteWindowOpen)),
+    redis.get(consensusCacheMetaKey(postId, voteWindowOpen)),
+  ]);
+  if (!rawConsensus || !rawMeta) return null;
+  try {
+    const meta = JSON.parse(rawMeta) as { expiresAt: number };
+    if (typeof meta.expiresAt !== "number" || meta.expiresAt <= Date.now()) {
+      return null;
+    }
+    return JSON.parse(rawConsensus) as Record<string, BadgeConsensus>;
+  } catch {
+    return null;
+  }
+}
+
+async function writeConsensusCache(
+  postId: string,
+  voteWindowOpen: boolean,
+  consensus: Record<string, BadgeConsensus>,
+): Promise<void> {
+  const expiresAt = Date.now() + CONSENSUS_CACHE_TTL_MS;
+  await Promise.all([
+    redis.set(consensusCacheKey(postId, voteWindowOpen), JSON.stringify(consensus)),
+    redis.set(
+      consensusCacheMetaKey(postId, voteWindowOpen),
+      JSON.stringify({ expiresAt }),
+    ),
+  ]);
+}
 
 // ============================
 // Entry point
@@ -227,13 +277,34 @@ async function isCurrentUserModerator(
   const username = usernameOverride ?? (await reddit.getCurrentUsername());
   if (!username) return false;
 
+   const cacheKey = moderatorCacheKey(subredditName, username);
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached) as { value: boolean; expiresAt: number };
+      if (typeof parsed.expiresAt === "number" && parsed.expiresAt > Date.now()) {
+        return !!parsed.value;
+      }
+    } catch {
+      // ignore malformed cache and refresh below
+    }
+  }
+
   try {
     const moderators = await reddit
       .getModerators({ subredditName, username, limit: 1, pageSize: 1 })
       .all();
-    return moderators.some(
+    const isModerator = moderators.some(
       (moderator: { username: string }) => moderator.username === username,
     );
+    await redis.set(
+      cacheKey,
+      JSON.stringify({
+        value: isModerator,
+        expiresAt: Date.now() + MODERATOR_CACHE_TTL_MS,
+      }),
+    );
+    return isModerator;
   } catch {
     return false;
   }
@@ -437,53 +508,62 @@ async function onInit(): Promise<InitResponse> {
   let consensusElo: number | null = null;
   let eloVoteCount = 0;
 
-  const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
-    redis.hGetAll(userVotesKey(postId, userId)),
-    redis.get(userEloKey(postId, userId)),
-    redis.get(eloVotesKey(postId)),
-  ]);
-
-  for (const [bid, cls] of Object.entries(uvRaw)) {
-    userVotes[bid] = cls as Classification;
-  }
-
-  if (userEloRaw) userElo = Number(userEloRaw);
-  if (allEloRaw) {
-    const eloArr = JSON.parse(allEloRaw) as number[];
-    eloVoteCount = eloArr.length;
-    if (eloArr.length > 0) {
-      consensusElo = Math.round(interquartileMean(eloArr));
-    }
-  }
-
   if (postData) {
+    const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
+      redis.hGetAll(userVotesKey(postId, userId)),
+      redis.get(userEloKey(postId, userId)),
+      redis.get(eloVotesKey(postId)),
+    ]);
+
+    for (const [bid, cls] of Object.entries(uvRaw)) {
+      userVotes[bid] = cls as Classification;
+    }
+
+    if (userEloRaw) userElo = Number(userEloRaw);
+    if (allEloRaw) {
+      const eloArr = JSON.parse(allEloRaw) as number[];
+      eloVoteCount = eloArr.length;
+      if (eloArr.length > 0) {
+        consensusElo = Math.round(interquartileMean(eloArr));
+      }
+    }
+
     await finalizeEloIfTimedOut(postId, postData);
 
-    const voteWindowOpen = isVoteWindowOpen(postData);
-    const placementList = getAllPlacements(postData).map(
-      ({ placement }) => placement,
-    );
-    const consensusEntries = await Promise.all(
-      placementList.map(async (placement) => {
-        const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
-        const computed = computeBadgeConsensus(allVotes);
-        if (
-          !voteWindowOpen &&
-          !computed.classification &&
-          computed.totalVotes > 0
-        ) {
-          computed.classification = iqmToClassification(
-            computed.iqm,
-            computed.voteCounts,
-            computed.totalVotes,
-          );
-        }
-        return [placement.id, computed] as const;
-      }),
-    );
+    if (postData.mode === "vote") {
+      const voteWindowOpen = isVoteWindowOpen(postData);
+      const cachedConsensus = await readConsensusCache(postId, voteWindowOpen);
+      if (cachedConsensus) {
+        Object.assign(consensus, cachedConsensus);
+      } else {
+        const placementList = getAllPlacements(postData).map(
+          ({ placement }) => placement,
+        );
+        const consensusEntries = await Promise.all(
+          placementList.map(async (placement) => {
+            const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+            const computed = computeBadgeConsensus(allVotes);
+            if (
+              !voteWindowOpen &&
+              !computed.classification &&
+              computed.totalVotes > 0
+            ) {
+              computed.classification = iqmToClassification(
+                computed.iqm,
+                computed.voteCounts,
+                computed.totalVotes,
+              );
+            }
+            return [placement.id, computed] as const;
+          }),
+        );
 
-    for (const [placementId, computed] of consensusEntries) {
-      consensus[placementId] = computed;
+        for (const [placementId, computed] of consensusEntries) {
+          consensus[placementId] = computed;
+        }
+
+        await writeConsensusCache(postId, voteWindowOpen, consensus);
+      }
     }
   }
 
@@ -583,6 +663,7 @@ async function onUpdatePost(req: IncomingMessage): Promise<UpdatePostResponse> {
     images: uploads,
   };
   await redis.set(postKey(postId), JSON.stringify(updatedPost));
+  await clearConsensusCache(postId);
 
   const subredditName = context.subredditName ?? "TextingTheory";
   const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
@@ -763,11 +844,19 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   );
 
   // Recompute all consensus
+  const consensusEntries = await Promise.all(
+    allPlacements.map(async ({ placement: p }) => {
+      const allVotes = await redis.hGetAll(votesKey(postId, p.id));
+      return [p.id, computeBadgeConsensus(allVotes)] as const;
+    }),
+  );
   const allConsensus: Record<string, BadgeConsensus> = {};
-  for (const { placement: p } of allPlacements) {
-    const allVotes = await redis.hGetAll(votesKey(postId, p.id));
-    allConsensus[p.id] = computeBadgeConsensus(allVotes);
+  for (const [badgeId, computed] of consensusEntries) {
+    allConsensus[badgeId] = computed;
   }
+
+  await clearConsensusCache(postId);
+  await writeConsensusCache(postId, true, allConsensus);
 
   return {
     type: "vote-badge",

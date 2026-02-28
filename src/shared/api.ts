@@ -4,7 +4,7 @@
 
 // --- Tuning constants (single source of truth) ---
 
-export const MIN_VOTES_FOR_BADGE_CONSENSUS = 25;
+export const MIN_VOTES_FOR_BADGE_CONSENSUS = 1;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
 export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
 export const MIN_VOTES_FOR_USER_FLAIR: number =
