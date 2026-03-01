@@ -19,7 +19,10 @@
   --tt-text-muted: light-dark(#5b6573, #aeb7c2);
   --tt-text-soft: light-dark(#6b7280, #97a3b1);
   --tt-input-bg: light-dark(#f7f9fb, rgba(255, 255, 255, 0.03));
-  --tt-input-border: light-dark(rgba(31, 41, 55, 0.22), rgba(255, 255, 255, 0.2));
+  --tt-input-border: light-dark(
+    rgba(31, 41, 55, 0.22),
+    rgba(255, 255, 255, 0.2)
+  );
   --tt-slider-track: light-dark(#c7d1d9, #4e5d69);
   --tt-slider-thumb-border: light-dark(#94a3b8, #d9dee8);
   --tt-accent-bg: #26c2a3;
@@ -963,7 +966,8 @@ html.tt-edit-boot #overlay-submit {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid light-dark(rgba(38, 194, 163, 0.2), rgba(38, 194, 163, 0.24));
+  border: 3px solid
+    light-dark(rgba(38, 194, 163, 0.2), rgba(38, 194, 163, 0.24));
   border-top-color: var(--tt-accent-bg);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

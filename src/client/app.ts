@@ -291,7 +291,10 @@ function mapUniformRadiusToImageRadius(
   return (diameterPx / imageBase) * 50;
 }
 
-function mapImageRadiusToUniformRadius(imageRadius: number, index: number): number {
+function mapImageRadiusToUniformRadius(
+  imageRadius: number,
+  index: number,
+): number {
   const uniformBase = editorUniformScaleBase();
   const imageBase = imageScaleBaseForIndex(index);
   return (imageRadius * imageBase) / Math.max(1, uniformBase);
@@ -343,7 +346,10 @@ function markerScaleBase(rect: ReturnType<typeof canvasRect>): number {
 function syncActivePlacementRadiiFromSlider(): void {
   const image = images[activeImageIndex];
   if (!image) return;
-  const mappedRadius = mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+  const mappedRadius = mapUniformRadiusToImageRadius(
+    globalRadius,
+    activeImageIndex,
+  );
   for (const placement of image.placements) {
     placement.radius = mappedRadius;
   }
