@@ -8,13 +8,36 @@
   user-select: none;
 }
 
+:root {
+  color-scheme: light dark;
+  --tt-bg: light-dark(#ffffff, #0c1416);
+  --tt-fg: light-dark(#1f2937, #f2f4f5);
+  --tt-panel: light-dark(#ffffff, #0c1416);
+  --tt-panel-strong: light-dark(#f6f7f8, #172126);
+  --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --tt-text-muted: light-dark(#5b6573, #aeb7c2);
+  --tt-text-soft: light-dark(#6b7280, #97a3b1);
+  --tt-input-bg: light-dark(#f7f9fb, rgba(255, 255, 255, 0.03));
+  --tt-input-border: light-dark(rgba(31, 41, 55, 0.22), rgba(255, 255, 255, 0.2));
+  --tt-slider-track: light-dark(#c7d1d9, #4e5d69);
+  --tt-slider-thumb-border: light-dark(#94a3b8, #d9dee8);
+  --tt-accent-bg: #26c2a3;
+  --tt-accent-bg-pressed: #1ea88d;
+  --tt-accent-fg: #ffffff;
+  --tt-accent-soft: light-dark(
+    rgba(38, 194, 163, 0.12),
+    rgba(38, 194, 163, 0.2)
+  );
+}
+
 html,
 body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: var(--tt-bg);
+  color: var(--tt-fg);
 }
 
 html.tt-edit-boot #screen-mode {
@@ -55,8 +78,9 @@ html.tt-edit-boot #overlay-submit {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #16213e;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--tt-panel);
+  border: 1px solid
+    color-mix(in srgb, var(--tt-accent-bg) 26%, var(--tt-border-weak));
   border-radius: 14px;
   padding: 14px 20px;
   width: 100%;
@@ -66,7 +90,11 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .mode-card:active {
-  background: #1f2e50;
+  background: color-mix(
+    in srgb,
+    var(--tt-panel-strong) 78%,
+    var(--tt-accent-soft)
+  );
 }
 
 .mode-icon {
@@ -81,18 +109,18 @@ html.tt-edit-boot #overlay-submit {
 .mode-name {
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tt-fg);
 }
 
 .mode-sub {
   font-size: 11px;
-  color: #999;
+  color: color-mix(in srgb, var(--tt-fg) 64%, transparent);
   margin-top: 2px;
 }
 
 .mode-hint {
   font-size: 10px;
-  color: #7f89a5;
+  color: color-mix(in srgb, var(--tt-fg) 52%, transparent);
   margin-top: 2px;
 }
 
@@ -101,7 +129,7 @@ html.tt-edit-boot #overlay-submit {
   max-width: 320px;
   font-size: 11px;
   line-height: 1.35;
-  color: #a9b4d2;
+  color: color-mix(in srgb, var(--tt-fg) 62%, transparent);
   text-align: center;
 }
 
@@ -121,7 +149,7 @@ html.tt-edit-boot #overlay-submit {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #1a1a2e;
+  background: var(--tt-bg);
 }
 
 .cm-canvas-wrap {
@@ -131,7 +159,7 @@ html.tt-edit-boot #overlay-submit {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #111;
+  background: var(--tt-bg);
   touch-action: none;
 }
 
@@ -182,9 +210,9 @@ html.tt-edit-boot #overlay-submit {
   width: 42px;
   height: 42px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(15, 15, 24, 0.7);
-  color: #fff;
+  border: 1px solid var(--tt-border);
+  background: color-mix(in srgb, var(--tt-panel) 82%, transparent);
+  color: var(--tt-fg);
   font-size: 24px;
   line-height: 1;
   font-weight: 700;
@@ -199,8 +227,8 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .cm-marker-toggle.active {
-  background: rgba(38, 194, 163, 0.86);
-  border-color: rgba(255, 255, 255, 0.58);
+  background: var(--tt-accent-bg);
+  border-color: var(--tt-border);
 }
 
 .image-nav {
@@ -322,7 +350,7 @@ html.tt-edit-boot #overlay-submit {
 
 .cm-image-index {
   font-size: 11px;
-  color: #dbe3f7;
+  color: var(--tt-text-muted);
   min-width: 24px;
   text-align: center;
   letter-spacing: 0;
@@ -331,10 +359,10 @@ html.tt-edit-boot #overlay-submit {
 .cm-mini-btn {
   width: 36px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--tt-input-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--tt-input-bg);
+  color: var(--tt-fg);
   font-weight: 800;
   font-size: 18px;
   line-height: 1;
@@ -375,7 +403,7 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .ed-badge--vote.selected {
-  outline: 2px solid #26c2a3;
+  outline: 2px solid var(--tt-accent-bg);
 }
 
 .ed-badge--ann {
@@ -394,8 +422,8 @@ html.tt-edit-boot #overlay-submit {
   right: 0;
   transform: translate(14%, 14%);
   border-radius: 50%;
-  background: #26c2a3;
-  color: #fff;
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -408,8 +436,8 @@ html.tt-edit-boot #overlay-submit {
 
 .cm-toolbar {
   flex-shrink: 0;
-  background: #16213e;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--tt-panel);
+  border-top: 1px solid var(--tt-border-weak);
   padding: 5px 7px max(5px, env(safe-area-inset-bottom));
 }
 
@@ -422,24 +450,24 @@ html.tt-edit-boot #overlay-submit {
 .cm-title,
 .cm-other {
   width: 100%;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--tt-input-bg);
+  border: 1px solid var(--tt-input-border);
   border-radius: 8px;
   padding: 8px 10px;
-  color: #fff;
+  color: var(--tt-fg);
   font-size: 14px;
   outline: none;
 }
 
 .cm-title::placeholder,
 .cm-other::placeholder {
-  color: #6d7590;
+  color: var(--tt-text-soft);
 }
 
 .cm-label {
   font-size: 11px;
   font-weight: 700;
-  color: #a4aec6;
+  color: var(--tt-text-muted);
   min-width: 62px;
   white-space: nowrap;
   flex-shrink: 0;
@@ -461,7 +489,7 @@ html.tt-edit-boot #overlay-submit {
 .cm-slider::-webkit-slider-runnable-track {
   height: 11px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--tt-slider-track);
 }
 
 .cm-slider::-webkit-slider-thumb {
@@ -470,14 +498,14 @@ html.tt-edit-boot #overlay-submit {
   height: 30px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid #d9dee8;
+  border: 2px solid var(--tt-slider-thumb-border);
   margin-top: -10px;
 }
 
 .cm-slider::-moz-range-track {
   height: 11px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--tt-slider-track);
 }
 
 .cm-slider::-moz-range-thumb {
@@ -485,7 +513,7 @@ html.tt-edit-boot #overlay-submit {
   height: 30px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid #d9dee8;
+  border: 2px solid var(--tt-slider-thumb-border);
 }
 
 .side-btns {
@@ -496,10 +524,10 @@ html.tt-edit-boot #overlay-submit {
 
 .side-btn {
   padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--tt-input-border);
   border-radius: 6px;
-  background: transparent;
-  color: #ccc;
+  background: var(--tt-input-bg);
+  color: var(--tt-text-muted);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -534,9 +562,9 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .side-btn.active {
-  background: rgba(38, 194, 163, 0.15);
-  border-color: #26c2a3;
-  color: #26c2a3;
+  background: var(--tt-accent-soft);
+  border-color: var(--tt-accent-bg);
+  color: var(--tt-accent-bg);
 }
 
 .me-check {
@@ -544,7 +572,7 @@ html.tt-edit-boot #overlay-submit {
   align-items: flex-start;
   gap: 5px;
   font-size: 11px;
-  color: #d3d9e8;
+  color: var(--tt-text-muted);
   margin-left: 2px;
   white-space: nowrap;
   line-height: 1.05;
@@ -556,7 +584,7 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .me-check input {
-  accent-color: #26c2a3;
+  accent-color: var(--tt-accent-bg);
 }
 
 .cm-actions {
@@ -567,7 +595,7 @@ html.tt-edit-boot #overlay-submit {
 .cm-btn-cancel,
 .cm-btn-post {
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--tt-input-border);
   padding: 8px 10px;
   font-size: 11px;
   font-weight: 700;
@@ -577,8 +605,8 @@ html.tt-edit-boot #overlay-submit {
 
 .cm-btn-add,
 .cm-btn-cancel {
-  background: transparent;
-  color: #d8deed;
+  background: var(--tt-input-bg);
+  color: var(--tt-fg);
 }
 
 .cm-btn-cancel {
@@ -587,8 +615,8 @@ html.tt-edit-boot #overlay-submit {
 
 .cm-btn-post {
   border: none;
-  background: linear-gradient(135deg, #26c2a3, #1ea88d);
-  color: #fff;
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
   min-width: 58px;
 }
 
@@ -664,8 +692,8 @@ html.tt-edit-boot #overlay-submit {
   right: 8px;
   bottom: max(8px, env(safe-area-inset-bottom));
   border-radius: 12px;
-  background: #16213e;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: var(--tt-panel);
+  border: 1px solid var(--tt-border-weak);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -695,8 +723,8 @@ html.tt-edit-boot #overlay-submit {
   right: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
   border-radius: 12px;
-  background: #16213e;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--tt-panel);
+  border: 1px solid var(--tt-border);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -706,13 +734,13 @@ html.tt-edit-boot #overlay-submit {
 .warn-title {
   font-size: 14px;
   font-weight: 800;
-  color: #fff;
+  color: var(--tt-fg);
 }
 
 .warn-text {
   font-size: 12px;
   line-height: 1.4;
-  color: #d7dced;
+  color: color-mix(in srgb, var(--tt-fg) 84%, transparent);
 }
 
 .warn-actions {
@@ -731,15 +759,15 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .warn-btn-secondary {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: transparent;
-  color: #d8deed;
+  border: 1px solid var(--tt-input-border);
+  background: var(--tt-input-bg);
+  color: var(--tt-fg);
 }
 
 .warn-btn-primary {
   border: none;
-  background: linear-gradient(135deg, #26c2a3, #1ea88d);
-  color: #fff;
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
 }
 
 .picker-modal {
@@ -764,8 +792,8 @@ html.tt-edit-boot #overlay-submit {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #1a1a2e;
-  border-top: 2px solid #26c2a3;
+  background: var(--tt-panel);
+  border-top: 2px solid var(--tt-border);
   border-radius: 14px 14px 0 0;
   padding: 14px 12px max(12px, env(safe-area-inset-bottom));
   transform: translateY(100%);
@@ -788,7 +816,7 @@ html.tt-edit-boot #overlay-submit {
   text-align: center;
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tt-fg);
   margin-bottom: 10px;
 }
 
@@ -810,7 +838,7 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .pk-item:active {
-  background: rgba(38, 194, 163, 0.1);
+  background: var(--tt-accent-soft);
 }
 
 .pk-item.no-active:active {
@@ -818,8 +846,8 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .pk-item.active {
-  background: rgba(38, 194, 163, 0.12);
-  outline: 1.5px solid #26c2a3;
+  background: var(--tt-accent-soft);
+  outline: 1.5px solid var(--tt-accent-bg);
   outline-offset: -1px;
 }
 
@@ -863,7 +891,7 @@ html.tt-edit-boot #overlay-submit {
 
 .pk-label {
   font-size: 10px;
-  color: #ccc;
+  color: var(--tt-text-muted);
   text-align: center;
   min-width: 66px;
   white-space: nowrap;
@@ -896,13 +924,13 @@ html.tt-edit-boot #overlay-submit {
 
 .pk-hint-popup {
   position: fixed;
-  background: rgba(22, 33, 62, 0.98);
-  border: 1px solid rgba(38, 194, 163, 0.3);
+  background: color-mix(in srgb, var(--tt-panel) 96%, transparent);
+  border: 1px solid var(--tt-border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 11px;
   line-height: 1.4;
-  color: #ccc;
+  color: var(--tt-text-muted);
   z-index: 300;
   max-width: 240px;
   pointer-events: none;
@@ -923,7 +951,7 @@ html.tt-edit-boot #overlay-submit {
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 5px solid rgba(38, 194, 163, 0.3);
+  border-top: 5px solid var(--tt-border);
 }
 
 @keyframes spin {
@@ -935,8 +963,8 @@ html.tt-edit-boot #overlay-submit {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid rgba(38, 194, 163, 0.15);
-  border-top-color: #26c2a3;
+  border: 3px solid light-dark(rgba(38, 194, 163, 0.2), rgba(38, 194, 163, 0.24));
+  border-top-color: var(--tt-accent-bg);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -950,7 +978,14 @@ html.tt-edit-boot #overlay-submit {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  background: light-dark(rgba(255, 255, 255, 0.86), rgba(0, 0, 0, 0.72));
+  color: light-dark(#1f2937, #ffffff);
   font-size: 14px;
+}
+
+#overlay-submit-text {
+  color: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-shadow: light-dark(none, 0 1px 2px rgba(0, 0, 0, 0.35));
 }

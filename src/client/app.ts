@@ -49,6 +49,9 @@ const PAGE_SLIDE_DURATION_MS = 150;
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
 let globalRadius = 6;
+let lastUsedRadius = 6;
+let imageRadiusByIndex: number[] = [];
+let imageRadiusTouchedByIndex: boolean[] = [];
 let eloSide: EloSide = "right";
 let meChecked = true;
 let pointerState: {
@@ -223,6 +226,7 @@ async function initEditSessionIfRequested(): Promise<void> {
 }
 
 globalRadius = Number(cmSize.value) || globalRadius;
+lastUsedRadius = globalRadius;
 
 function maxImagesForMode(): number {
   return mode === "annotated"
@@ -250,6 +254,7 @@ function applySliderBoundsForMode(): void {
     cmSize.value = String(max);
   }
   globalRadius = Number(cmSize.value) || Math.min(max, Math.max(min, 6));
+  lastUsedRadius = clampGlobalRadius(globalRadius);
 }
 
 function editorBoxSize(): { width: number; height: number } {
@@ -286,16 +291,61 @@ function mapUniformRadiusToImageRadius(
   return (diameterPx / imageBase) * 50;
 }
 
+function mapImageRadiusToUniformRadius(imageRadius: number, index: number): number {
+  const uniformBase = editorUniformScaleBase();
+  const imageBase = imageScaleBaseForIndex(index);
+  return (imageRadius * imageBase) / Math.max(1, uniformBase);
+}
+
+function clampGlobalRadius(value: number): number {
+  const min = sliderMinForMode();
+  const max = sliderMaxForMode();
+  return Math.min(max, Math.max(min, value));
+}
+
+function resetPerImageRadiusState(): void {
+  const initialRadius = clampGlobalRadius(Number(cmSize.value) || globalRadius);
+  globalRadius = initialRadius;
+  lastUsedRadius = initialRadius;
+  imageRadiusByIndex = images.map(() => initialRadius);
+  imageRadiusTouchedByIndex = images.map(() => false);
+}
+
+function syncSliderForActiveImage(): void {
+  const activeImage = images[activeImageIndex];
+  if (!activeImage) return;
+  const hasCustom = imageRadiusTouchedByIndex[activeImageIndex] === true;
+  let nextRadius = hasCustom ? imageRadiusByIndex[activeImageIndex] : undefined;
+  if (!hasCustom) {
+    const existingPlacement = activeImage.placements[0];
+    if (existingPlacement?.radius != null) {
+      nextRadius = mapImageRadiusToUniformRadius(
+        existingPlacement.radius,
+        activeImageIndex,
+      );
+    }
+  }
+  if (nextRadius == null) {
+    nextRadius = lastUsedRadius;
+  }
+  const clamped = clampGlobalRadius(nextRadius ?? globalRadius);
+  globalRadius = clamped;
+  if (!hasCustom) {
+    imageRadiusByIndex[activeImageIndex] = clamped;
+  }
+  cmSize.value = String(clamped);
+}
+
 function markerScaleBase(rect: ReturnType<typeof canvasRect>): number {
   return Math.max(rect.imgW, rect.imgH);
 }
 
-function syncPlacementRadiiFromSlider(): void {
-  for (const [index, image] of images.entries()) {
-    const mappedRadius = mapUniformRadiusToImageRadius(globalRadius, index);
-    for (const placement of image.placements) {
-      placement.radius = mappedRadius;
-    }
+function syncActivePlacementRadiiFromSlider(): void {
+  const image = images[activeImageIndex];
+  if (!image) return;
+  const mappedRadius = mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+  for (const placement of image.placements) {
+    placement.radius = mappedRadius;
   }
 }
 
@@ -427,6 +477,8 @@ cmTitle.addEventListener("input", () => {
 function openEditor() {
   applySliderBoundsForMode();
   globalRadius = Number(cmSize.value) || globalRadius;
+  lastUsedRadius = clampGlobalRadius(globalRadius);
+  resetPerImageRadiusState();
   markerModeEnabled = false;
   updateMarkerToggleUI();
   document.title = "Creating Texting Theory Post";
@@ -441,9 +493,7 @@ function openEditor() {
   } else {
     hintEl.style.display = "";
   }
-  if (!isEditSession) {
-    syncPlacementRadiiFromSlider();
-  }
+  syncSliderForActiveImage();
   updateSideUI();
   loadActiveImage(false);
   scheduleEditorLayoutRefresh();
@@ -604,6 +654,7 @@ function loadActiveImage(animate = true) {
 
   const finalizeLoadedImage = () => {
     cmImg.src = image.dataUrl;
+    syncSliderForActiveImage();
     render();
     requestAnimationFrame(() => {
       render();
@@ -1146,8 +1197,11 @@ cmMarkerToggle.addEventListener("pointerdown", (event) => {
 });
 
 cmSize.addEventListener("input", () => {
-  globalRadius = Number(cmSize.value);
-  syncPlacementRadiiFromSlider();
+  globalRadius = clampGlobalRadius(Number(cmSize.value) || globalRadius);
+  lastUsedRadius = globalRadius;
+  imageRadiusByIndex[activeImageIndex] = globalRadius;
+  imageRadiusTouchedByIndex[activeImageIndex] = true;
+  syncActivePlacementRadiiFromSlider();
   render();
 });
 

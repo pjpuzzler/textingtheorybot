@@ -8,13 +8,30 @@
   user-select: none;
 }
 
+:root {
+  color-scheme: light dark;
+  --tt-bg: light-dark(#ffffff, #0c1416);
+  --tt-fg: light-dark(#1f2937, #f2f4f5);
+  --tt-panel: light-dark(#ffffff, #0c1416);
+  --tt-panel-strong: light-dark(#f6f7f8, #172126);
+  --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --tt-accent-bg: #26c2a3;
+  --tt-accent-bg-pressed: #1ea88d;
+  --tt-accent-fg: #ffffff;
+  --tt-accent-soft: light-dark(
+    rgba(38, 194, 163, 0.12),
+    rgba(38, 194, 163, 0.2)
+  );
+}
+
 html,
 body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: var(--tt-bg);
+  color: var(--tt-fg);
 }
 
 .loading {
@@ -28,8 +45,8 @@ body {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid rgba(38, 194, 163, 0.15);
-  border-top-color: #26c2a3;
+  border: 3px solid light-dark(rgba(38, 194, 163, 0.2), rgba(38, 194, 163, 0.24));
+  border-top-color: var(--tt-accent-bg);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -54,7 +71,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #111;
+  background: var(--tt-bg);
 }
 
 .canvas-img {
@@ -210,9 +227,9 @@ body {
   border-radius: 999px;
   width: 34px;
   height: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(38, 194, 163, 0.9);
-  color: #fff;
+  border: 1px solid var(--tt-border);
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
   font-size: 20px;
   line-height: 1;
   font-weight: 700;
@@ -223,7 +240,7 @@ body {
 }
 
 .quick-create:active {
-  background: rgba(38, 194, 163, 0.75);
+  background: var(--tt-accent-bg-pressed);
 }
 
 .mod-edit {
@@ -354,7 +371,7 @@ body {
     transparent 250deg 270deg,
     #749bbf 270deg 295deg,
     transparent 295deg 315deg,
-    #26c2a3 315deg 340deg,
+    #9ca3af 315deg 340deg,
     transparent 340deg 360deg
   );
   -webkit-mask: radial-gradient(
@@ -367,7 +384,7 @@ body {
     transparent calc(100% - var(--ring-width, 2px)),
     #000 calc(100% - var(--ring-width, 2px))
   );
-  animation: ring-spin 15s linear infinite;
+  animation: ring-spin 24s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
@@ -397,10 +414,10 @@ body {
 
 .elo {
   flex-shrink: 0;
-  background: #16213e;
+  background: var(--tt-panel);
   padding: 6px 8px;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--tt-border-weak);
 }
 
 .elo-row {
@@ -471,7 +488,7 @@ body {
 .elo-val {
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tt-fg);
   min-width: 68px;
   text-align: center;
   white-space: nowrap;
@@ -483,8 +500,8 @@ body {
   border-radius: 8px;
   font-weight: 700;
   font-size: 12px;
-  background: linear-gradient(135deg, #26c2a3, #1ea88d);
-  color: #fff;
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
   cursor: pointer;
   white-space: nowrap;
   width: 72px;
@@ -508,7 +525,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: #1a1a2e;
+  background: var(--tt-bg);
 }
 
 .create-logo {
@@ -520,12 +537,12 @@ body {
 .create-title {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tt-fg);
 }
 
 .create-desc {
   font-size: 13px;
-  color: #999;
+  color: color-mix(in srgb, var(--tt-fg) 64%, transparent);
   text-align: center;
 }
 
@@ -535,8 +552,8 @@ body {
   border-radius: 8px;
   font-weight: 700;
   font-size: 14px;
-  background: linear-gradient(135deg, #26c2a3, #1ea88d);
-  color: #fff;
+  background: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
   cursor: pointer;
   margin-top: 8px;
 }
@@ -563,8 +580,8 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #1a1a2e;
-  border-top: 2px solid #26c2a3;
+  background: var(--tt-panel);
+  border-top: 2px solid var(--tt-border);
   border-radius: 14px 14px 0 0;
   padding: 14px 12px;
   padding-bottom: max(14px, env(safe-area-inset-bottom));
@@ -588,7 +605,7 @@ body {
   text-align: center;
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--tt-fg);
   margin-bottom: 10px;
 }
 
@@ -611,7 +628,7 @@ body {
 }
 
 .pk-item:active {
-  background: rgba(38, 194, 163, 0.1);
+  background: var(--tt-accent-soft);
 }
 
 .pk-item.no-active:active {
@@ -619,8 +636,8 @@ body {
 }
 
 .pk-item.active {
-  background: rgba(38, 194, 163, 0.12);
-  outline: 1.5px solid #26c2a3;
+  background: var(--tt-accent-soft);
+  outline: 1.5px solid var(--tt-border);
   outline-offset: -1px;
 }
 
@@ -697,8 +714,8 @@ body {
 
 .pk-hint-popup {
   position: fixed;
-  background: rgba(22, 33, 62, 0.98);
-  border: 1px solid rgba(38, 194, 163, 0.3);
+  background: color-mix(in srgb, var(--tt-panel) 96%, transparent);
+  border: 1px solid var(--tt-border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 11px;
@@ -724,5 +741,5 @@ body {
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 5px solid rgba(38, 194, 163, 0.3);
+  border-top: 5px solid var(--tt-border);
 }

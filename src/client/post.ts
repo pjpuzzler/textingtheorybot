@@ -46,6 +46,7 @@ let queuedNavIndex: number | null = null;
 let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
+const UNVOTED_RING_WIDTH_PX = 1.5;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -353,9 +354,11 @@ async function init() {
     updateImageNav();
     loadCurrentImage(false);
 
-    if (canVoteOnCurrentPost()) {
+    if (canVoteOnCurrentPost() && !isExpandedView) {
       eloEl.style.display = "";
       setupElo();
+    } else {
+      eloEl.style.display = "none";
     }
 
     if (refreshTimer === null && isExpandedView) {
@@ -421,7 +424,7 @@ async function refreshPostState() {
       activeImageIndex = Math.max(0, postData.images.length - 1);
     }
 
-    if (canVoteOnCurrentPost()) {
+    if (canVoteOnCurrentPost() && !isExpandedView) {
       eloEl.style.display = "";
       updateEloDisplay();
     } else {
@@ -739,7 +742,7 @@ function layoutBadges(force = false) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
           el.style.setProperty("--ring-delay", `${ringPhaseDelaySeconds()}s`);
-          el.style.setProperty("--ring-width", `2px`);
+          el.style.setProperty("--ring-width", `${UNVOTED_RING_WIDTH_PX}px`);
         }
 
         if (uv && !isOwnPost() && canVoteOnCurrentPost()) {
