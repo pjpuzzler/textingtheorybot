@@ -498,7 +498,8 @@ function renderCropSelection(): void {
         : "unknown";
       el.style.backgroundImage = `url(/assets/badges/${key}.png)`;
       const radius =
-        placement.radius ?? mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+        placement.radius ??
+        mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
       const sizePx = ((radius * 2) / 100) * scaleBase;
       el.style.width = `${sizePx}px`;
       el.style.height = `${sizePx}px`;
@@ -596,7 +597,9 @@ function updateCropMarkerUI(): void {
   cropPreviewWrap.classList.toggle("marker-mode", cropMarkerModeEnabled);
   cropMarkerToggle.setAttribute(
     "aria-label",
-    cropMarkerModeEnabled ? "Disable redaction marker" : "Enable redaction marker",
+    cropMarkerModeEnabled
+      ? "Disable redaction marker"
+      : "Enable redaction marker",
   );
 }
 
@@ -647,7 +650,9 @@ function onCropMarkerPointerUp(event: PointerEvent): void {
   window.removeEventListener("pointercancel", onCropMarkerPointerUp);
 }
 
-function pointerEventToCropPct(event: PointerEvent): { x: number; y: number } | null {
+function pointerEventToCropPct(
+  event: PointerEvent,
+): { x: number; y: number } | null {
   const r = cropPreviewRect();
   if (r.w <= 0 || r.h <= 0) return null;
   const wrapRect = cropPreviewWrap.getBoundingClientRect();
@@ -658,11 +663,18 @@ function pointerEventToCropPct(event: PointerEvent): { x: number; y: number } | 
   return { x: clampPct(x), y: clampPct(y) };
 }
 
-function mapPercentForCrop(valuePct: number, start: number, span: number): number {
+function mapPercentForCrop(
+  valuePct: number,
+  start: number,
+  span: number,
+): number {
   return ((valuePct / 100 - start) / span) * 100;
 }
 
-function dominantSourceAxisLengthForDimensions(width: number, height: number): number {
+function dominantSourceAxisLengthForDimensions(
+  width: number,
+  height: number,
+): number {
   const box = editorBoxSize();
   const iw = Math.max(1, width || 1);
   const ih = Math.max(1, height || 1);
@@ -741,7 +753,12 @@ async function cropImageInPlace(
   const spanY = bottomN - topN;
 
   if (spanX <= 0 || spanY <= 0) return;
-  if (selection.left === 0 && selection.top === 0 && selection.right === 100 && selection.bottom === 100) {
+  if (
+    selection.left === 0 &&
+    selection.top === 0 &&
+    selection.right === 100 &&
+    selection.bottom === 100
+  ) {
     return;
   }
 
@@ -764,43 +781,50 @@ async function cropImageInPlace(
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
 
   const mime = image.mime === "image/png" ? "image/png" : "image/jpeg";
-  const dataUrl = canvas.toDataURL(mime, mime === "image/jpeg" ? 0.98 : undefined);
+  const dataUrl = canvas.toDataURL(
+    mime,
+    mime === "image/jpeg" ? 0.98 : undefined,
+  );
 
   const newImageBase = imageScaleBaseForDimensions(sw, sh);
-  const oldDominantSourceAxis = dominantSourceAxisLengthForDimensions(srcW, srcH);
+  const oldDominantSourceAxis = dominantSourceAxisLengthForDimensions(
+    srcW,
+    srcH,
+  );
   const newDominantSourceAxis = dominantSourceAxisLengthForDimensions(sw, sh);
-  const sourceSizePreserveScale = oldDominantSourceAxis / Math.max(1, newDominantSourceAxis);
+  const sourceSizePreserveScale =
+    oldDominantSourceAxis / Math.max(1, newDominantSourceAxis);
 
-  const mappedPlacements = image.placements
-    .map((placement) => {
-      const mappedX = mapPercentForCrop(placement.x, leftN, spanX);
-      const mappedY = mapPercentForCrop(placement.y, topN, spanY);
-      const currentRadius =
-        placement.radius ?? mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
-      const desiredRadius = currentRadius * sourceSizePreserveScale;
-      const currentUniform = mapImageRadiusToUniformRadiusForBase(
-        desiredRadius,
-        newImageBase,
-      );
-      const boundedUniform = clampGlobalRadius(currentUniform);
-      const boundedRadius = mapUniformRadiusToImageRadiusForBase(
-        boundedUniform,
-        newImageBase,
-      );
-      const clamped = clampPlacementToImageBounds(
-        mappedX,
-        mappedY,
-        boundedRadius,
-        sw,
-        sh,
-      );
-      return {
-        ...placement,
-        x: clamped.x,
-        y: clamped.y,
-        radius: boundedRadius,
-      } as BadgePlacement;
-    });
+  const mappedPlacements = image.placements.map((placement) => {
+    const mappedX = mapPercentForCrop(placement.x, leftN, spanX);
+    const mappedY = mapPercentForCrop(placement.y, topN, spanY);
+    const currentRadius =
+      placement.radius ??
+      mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+    const desiredRadius = currentRadius * sourceSizePreserveScale;
+    const currentUniform = mapImageRadiusToUniformRadiusForBase(
+      desiredRadius,
+      newImageBase,
+    );
+    const boundedUniform = clampGlobalRadius(currentUniform);
+    const boundedRadius = mapUniformRadiusToImageRadiusForBase(
+      boundedUniform,
+      newImageBase,
+    );
+    const clamped = clampPlacementToImageBounds(
+      mappedX,
+      mappedY,
+      boundedRadius,
+      sw,
+      sh,
+    );
+    return {
+      ...placement,
+      x: clamped.x,
+      y: clamped.y,
+      radius: boundedRadius,
+    } as BadgePlacement;
+  });
 
   const mappedRedactions = image.redactions
     .map((stroke) => {
