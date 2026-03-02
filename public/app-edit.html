@@ -39,7 +39,7 @@
         </div>
         <div>
           <div class="mode-name">Community Vote</div>
-          <div class="mode-sub">Let others judge me</div>
+          <div class="mode-sub">Let others judge</div>
           <div class="mode-hint">Max 3 images</div>
         </div>
       </div>
@@ -52,8 +52,8 @@
           ></div>
         </div>
         <div>
-          <div class="mode-name">Annotate Myself</div>
-          <div class="mode-sub">Place your own badges (no Elo voting)</div>
+          <div class="mode-name">Annotate</div>
+          <div class="mode-sub">Place badges yourself (no Elo vote)</div>
           <div class="mode-hint">Max 1 image</div>
         </div>
       </div>
@@ -91,8 +91,8 @@
           </div>
           <div class="hint" id="hint">
             Tap to place a badge by <b>most</b>, if not
-            <b>all</b> messages.<br />Place along the inner edge if able.<br />Use
-            the marker button in the top-right to redact.
+            <b>all</b> messages.<br />Place along the center edge if
+            possible.<br />Use the slider to adjust badge sizing.
           </div>
         </div>
 
@@ -121,6 +121,9 @@
               aria-label="Move badge down"
             >
               ↓
+            </button>
+            <button class="cm-crop-btn" id="cm-crop" aria-label="Crop image">
+              Crop
             </button>
             <button class="cm-btn-post" id="cm-btn-next">Next</button>
           </div>
@@ -166,7 +169,7 @@
             class="cm-other"
             id="cm-other"
             maxlength="16"
-            placeholder="If other, who?"
+            placeholder="Who? (Use 'Me' to refer to yourself)"
           />
         </div>
       </div>
@@ -191,6 +194,25 @@
       </div>
     </div>
 
+    <div class="warn-modal" id="missing-image-modal">
+      <div class="warn-bg" id="missing-image-bg"></div>
+      <div class="warn-card">
+        <div class="warn-title">Some images have no badges</div>
+        <div class="warn-text">
+          One or more uploaded images don’t have any badges yet. Please confirm
+          you want to continue.
+        </div>
+        <div class="warn-actions">
+          <button class="warn-btn warn-btn-secondary" id="missing-image-cancel">
+            Go Back
+          </button>
+          <button class="warn-btn warn-btn-primary" id="missing-image-continue">
+            Continue
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Badge Picker Sheet -->
     <div class="picker-modal" id="picker-modal">
       <div class="picker-bg" id="picker-bg"></div>
@@ -200,6 +222,69 @@
           Vote for Classification
         </div>
         <div class="picker-body" id="picker-body"></div>
+      </div>
+    </div>
+
+    <div class="crop-modal" id="crop-modal">
+      <div class="crop-bg" id="crop-bg"></div>
+      <div class="crop-sheet">
+        <div class="crop-head">
+          <div class="crop-title">Crop image</div>
+          <div class="crop-step" id="crop-step"></div>
+          <button class="crop-reset-btn" id="crop-reset">Reset</button>
+        </div>
+        <div class="crop-preview-wrap" id="crop-preview-wrap">
+          <img class="crop-preview" id="crop-preview" alt="Crop preview" />
+          <canvas class="crop-redact-layer" id="crop-redact-layer"></canvas>
+          <div class="crop-badges" id="crop-badges"></div>
+          <div class="crop-mask" id="crop-mask">
+            <div class="crop-mask-seg" id="crop-mask-top"></div>
+            <div class="crop-mask-seg" id="crop-mask-right"></div>
+            <div class="crop-mask-seg" id="crop-mask-bottom"></div>
+            <div class="crop-mask-seg" id="crop-mask-left"></div>
+          </div>
+          <button
+            class="crop-marker-toggle"
+            id="crop-marker-toggle"
+            aria-label="Enable redaction marker"
+          >
+            ✎
+          </button>
+          <div class="crop-box" id="crop-box">
+            <button
+              class="crop-handle tl"
+              id="crop-handle-tl"
+              aria-label="Top left crop corner"
+            ></button>
+            <button
+              class="crop-handle tr"
+              id="crop-handle-tr"
+              aria-label="Top right crop corner"
+            ></button>
+            <button
+              class="crop-handle bl"
+              id="crop-handle-bl"
+              aria-label="Bottom left crop corner"
+            ></button>
+            <button
+              class="crop-handle br"
+              id="crop-handle-br"
+              aria-label="Bottom right crop corner"
+            ></button>
+          </div>
+        </div>
+        <div class="crop-actions">
+          <div class="crop-note">
+            <span class="crop-note-line">Drag corners to crop.</span>
+            <span class="crop-note-line">Use ✎ to redact.</span>
+          </div>
+          <button class="warn-btn warn-btn-secondary" id="crop-cancel">
+            Cancel
+          </button>
+          <button class="warn-btn warn-btn-primary" id="crop-apply">
+            Apply
+          </button>
+        </div>
       </div>
     </div>
 

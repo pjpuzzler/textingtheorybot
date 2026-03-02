@@ -13,7 +13,7 @@
   --tt-bg: light-dark(#ffffff, #0c1416);
   --tt-fg: light-dark(#1f2937, #f2f4f5);
   --tt-panel: light-dark(#ffffff, #0c1416);
-  --tt-panel-strong: light-dark(#f6f7f8, #172126);
+  --tt-panel-strong: light-dark(#f6f7f8, #0c1416);
   --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
   --tt-accent-bg: #26c2a3;
@@ -682,7 +682,7 @@ body {
 
 .pk-label {
   font-size: 10px;
-  color: #ccc;
+  color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
   text-align: center;
   line-height: 1.2;
   white-space: nowrap;
@@ -721,7 +721,7 @@ body {
   padding: 10px 12px;
   font-size: 11px;
   line-height: 1.4;
-  color: #ccc;
+  color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
   z-index: 300;
   max-width: 240px;
   pointer-events: none;

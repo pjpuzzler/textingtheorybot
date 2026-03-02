@@ -656,6 +656,9 @@ imgNext.addEventListener("click", () => {
 });
 
 canvasEl.addEventListener("click", (event) => {
+  if (isExpandedView) {
+    return;
+  }
   if (Date.now() < suppressCanvasExpandUntil) {
     return;
   }

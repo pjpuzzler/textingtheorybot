@@ -45,6 +45,7 @@ const ANNOTATED_MAX_RADIUS = 7;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 150;
+const MIN_CROP_SIZE_PCT = 8;
 
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
@@ -54,6 +55,17 @@ let imageRadiusByIndex: number[] = [];
 let imageRadiusTouchedByIndex: boolean[] = [];
 let eloSide: EloSide = "right";
 let meChecked = true;
+let cropApplying = false;
+let createCropFlowActive = false;
+let createCropFlowIndex = 0;
+let cropSelection = { left: 0, top: 0, right: 100, bottom: 100 };
+let activeCropHandle: "tl" | "tr" | "bl" | "br" | null = null;
+let cropMarkerModeEnabled = false;
+let cropDrawingPointerId: number | null = null;
+let cropActiveStroke: RedactionStroke | null = null;
+let cropWorkingImage: EditorImage | null = null;
+let cropOriginalImage: EditorImage | null = null;
+let cropAutoZoomTimer: number | null = null;
 let pointerState: {
   badgeId: string;
   pointerId: number;
@@ -113,6 +125,7 @@ const cmImgNext = $("cm-img-next") as HTMLButtonElement;
 const cmImgDots = $("cm-img-dots") as HTMLDivElement;
 
 const cmSize = $("cm-size") as HTMLInputElement;
+const cmCrop = $("cm-crop") as HTMLButtonElement;
 const cmOrderUp = $("cm-order-up") as HTMLButtonElement;
 const cmOrderDown = $("cm-order-down") as HTMLButtonElement;
 const cmPost = $("cm-btn-post") as HTMLButtonElement;
@@ -125,6 +138,10 @@ const singleBadgeModal = $("single-badge-modal") as HTMLDivElement;
 const singleBadgeBg = $("single-badge-bg") as HTMLDivElement;
 const singleBadgeCancel = $("single-badge-cancel") as HTMLButtonElement;
 const singleBadgeContinue = $("single-badge-continue") as HTMLButtonElement;
+const missingImageModal = $("missing-image-modal") as HTMLDivElement;
+const missingImageBg = $("missing-image-bg") as HTMLDivElement;
+const missingImageCancel = $("missing-image-cancel") as HTMLButtonElement;
+const missingImageContinue = $("missing-image-continue") as HTMLButtonElement;
 
 const sideLeftBtn = $("side-left") as HTMLButtonElement;
 const sideRightBtn = $("side-right") as HTMLButtonElement;
@@ -140,6 +157,28 @@ const pickerModal = $("picker-modal") as HTMLDivElement;
 const pickerBg = $("picker-bg") as HTMLDivElement;
 const pickerTitle = $("picker-title") as HTMLDivElement;
 const pickerBody = $("picker-body") as HTMLDivElement;
+
+const cropModal = $("crop-modal") as HTMLDivElement;
+const cropBg = $("crop-bg") as HTMLDivElement;
+const cropStep = $("crop-step") as HTMLDivElement;
+const cropPreviewWrap = $("crop-preview-wrap") as HTMLDivElement;
+const cropPreview = $("crop-preview") as HTMLImageElement;
+const cropRedactLayer = $("crop-redact-layer") as HTMLCanvasElement;
+const cropBadges = $("crop-badges") as HTMLDivElement;
+const cropMask = $("crop-mask") as HTMLDivElement;
+const cropMaskTop = $("crop-mask-top") as HTMLDivElement;
+const cropMaskRight = $("crop-mask-right") as HTMLDivElement;
+const cropMaskBottom = $("crop-mask-bottom") as HTMLDivElement;
+const cropMaskLeft = $("crop-mask-left") as HTMLDivElement;
+const cropMarkerToggle = $("crop-marker-toggle") as HTMLButtonElement;
+const cropBox = $("crop-box") as HTMLDivElement;
+const cropHandleTl = $("crop-handle-tl") as HTMLButtonElement;
+const cropHandleTr = $("crop-handle-tr") as HTMLButtonElement;
+const cropHandleBl = $("crop-handle-bl") as HTMLButtonElement;
+const cropHandleBr = $("crop-handle-br") as HTMLButtonElement;
+const cropReset = $("crop-reset") as HTMLButtonElement;
+const cropCancel = $("crop-cancel") as HTMLButtonElement;
+const cropApply = $("crop-apply") as HTMLButtonElement;
 
 let pendingNewAnnotation: BadgePlacement | null = null;
 let suppressEditorPickerUntil = 0;
@@ -272,9 +311,13 @@ function editorUniformScaleBase(): number {
 function imageScaleBaseForIndex(index: number): number {
   const image = images[index];
   if (!image) return 1;
+  return imageScaleBaseForDimensions(image.width || 1, image.height || 1);
+}
+
+function imageScaleBaseForDimensions(width: number, height: number): number {
   const box = editorBoxSize();
-  const iw = Math.max(1, image.width || 1);
-  const ih = Math.max(1, image.height || 1);
+  const iw = Math.max(1, width || 1);
+  const ih = Math.max(1, height || 1);
   const containScale = Math.min(box.width / iw, box.height / ih);
   const renderedW = iw * containScale;
   const renderedH = ih * containScale;
@@ -289,6 +332,23 @@ function mapUniformRadiusToImageRadius(
   const imageBase = imageScaleBaseForIndex(index);
   const diameterPx = ((baseRadius * 2) / 100) * uniformBase;
   return (diameterPx / imageBase) * 50;
+}
+
+function mapUniformRadiusToImageRadiusForBase(
+  baseRadius: number,
+  imageBase: number,
+): number {
+  const uniformBase = editorUniformScaleBase();
+  const diameterPx = ((baseRadius * 2) / 100) * uniformBase;
+  return (diameterPx / Math.max(1, imageBase)) * 50;
+}
+
+function mapImageRadiusToUniformRadiusForBase(
+  imageRadius: number,
+  imageBase: number,
+): number {
+  const uniformBase = editorUniformScaleBase();
+  return (imageRadius * Math.max(1, imageBase)) / Math.max(1, uniformBase);
 }
 
 function mapImageRadiusToUniformRadius(
@@ -343,6 +403,444 @@ function markerScaleBase(rect: ReturnType<typeof canvasRect>): number {
   return Math.max(rect.imgW, rect.imgH);
 }
 
+function clampPct(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function cropPreviewRect(): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const boxW = cropPreviewWrap.clientWidth;
+  const boxH = cropPreviewWrap.clientHeight;
+  const target = cropWorkingImage ?? getActiveImage();
+  const naturalW = cropPreview.naturalWidth || target?.width || 0;
+  const naturalH = cropPreview.naturalHeight || target?.height || 0;
+  if (boxW <= 0 || boxH <= 0 || naturalW <= 0 || naturalH <= 0) {
+    return { x: 0, y: 0, w: 0, h: 0 };
+  }
+  const scale = Math.min(boxW / naturalW, boxH / naturalH);
+  const w = naturalW * scale;
+  const h = naturalH * scale;
+  return {
+    x: (boxW - w) / 2,
+    y: (boxH - h) / 2,
+    w,
+    h,
+  };
+}
+
+function renderCropSelection(): void {
+  const r = cropPreviewRect();
+  if (r.w <= 0 || r.h <= 0) return;
+  const leftPx = r.x + (cropSelection.left / 100) * r.w;
+  const topPx = r.y + (cropSelection.top / 100) * r.h;
+  const rightPx = r.x + (cropSelection.right / 100) * r.w;
+  const bottomPx = r.y + (cropSelection.bottom / 100) * r.h;
+  cropBox.style.left = `${leftPx}px`;
+  cropBox.style.top = `${topPx}px`;
+  cropBox.style.width = `${Math.max(1, rightPx - leftPx)}px`;
+  cropBox.style.height = `${Math.max(1, bottomPx - topPx)}px`;
+
+  const drawW = Math.max(1, Math.round(r.w));
+  const drawH = Math.max(1, Math.round(r.h));
+  cropRedactLayer.style.left = `${r.x}px`;
+  cropRedactLayer.style.top = `${r.y}px`;
+  cropRedactLayer.style.width = `${r.w}px`;
+  cropRedactLayer.style.height = `${r.h}px`;
+  if (cropRedactLayer.width !== drawW) cropRedactLayer.width = drawW;
+  if (cropRedactLayer.height !== drawH) cropRedactLayer.height = drawH;
+  cropBadges.style.left = `${r.x}px`;
+  cropBadges.style.top = `${r.y}px`;
+  cropBadges.style.width = `${r.w}px`;
+  cropBadges.style.height = `${r.h}px`;
+  cropMask.style.left = `${r.x}px`;
+  cropMask.style.top = `${r.y}px`;
+  cropMask.style.width = `${r.w}px`;
+  cropMask.style.height = `${r.h}px`;
+
+  const cropX = Math.max(0, leftPx - r.x);
+  const cropY = Math.max(0, topPx - r.y);
+  const cropW = Math.max(1, rightPx - leftPx);
+  const cropH = Math.max(1, bottomPx - topPx);
+
+  cropMaskTop.style.left = "0px";
+  cropMaskTop.style.top = "0px";
+  cropMaskTop.style.width = `${r.w}px`;
+  cropMaskTop.style.height = `${Math.max(0, cropY)}px`;
+
+  cropMaskBottom.style.left = "0px";
+  cropMaskBottom.style.top = `${Math.max(0, cropY + cropH)}px`;
+  cropMaskBottom.style.width = `${r.w}px`;
+  cropMaskBottom.style.height = `${Math.max(0, r.h - (cropY + cropH))}px`;
+
+  cropMaskLeft.style.left = "0px";
+  cropMaskLeft.style.top = `${Math.max(0, cropY)}px`;
+  cropMaskLeft.style.width = `${Math.max(0, cropX)}px`;
+  cropMaskLeft.style.height = `${Math.max(0, cropH)}px`;
+
+  cropMaskRight.style.left = `${Math.max(0, cropX + cropW)}px`;
+  cropMaskRight.style.top = `${Math.max(0, cropY)}px`;
+  cropMaskRight.style.width = `${Math.max(0, r.w - (cropX + cropW))}px`;
+  cropMaskRight.style.height = `${Math.max(0, cropH)}px`;
+
+  const target = cropWorkingImage ?? getActiveImage();
+  cropBadges.innerHTML = "";
+  if (target) {
+    const scaleBase = Math.max(r.w, r.h);
+    for (const placement of target.placements) {
+      const el = document.createElement("div");
+      el.className = "crop-badge";
+      const key = placement.classification
+        ? placement.classification.toLowerCase()
+        : "unknown";
+      el.style.backgroundImage = `url(/assets/badges/${key}.png)`;
+      const radius =
+        placement.radius ?? mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+      const sizePx = ((radius * 2) / 100) * scaleBase;
+      el.style.width = `${sizePx}px`;
+      el.style.height = `${sizePx}px`;
+      el.style.left = `${placement.x}%`;
+      el.style.top = `${placement.y}%`;
+      cropBadges.appendChild(el);
+    }
+  }
+
+  const ctx = cropRedactLayer.getContext("2d");
+  if (ctx) {
+    ctx.clearRect(0, 0, cropRedactLayer.width, cropRedactLayer.height);
+    const redactions = target?.redactions ?? [];
+    drawRedactionsOnContext(
+      ctx,
+      redactions,
+      cropRedactLayer.width,
+      cropRedactLayer.height,
+    );
+  }
+}
+
+function resetCropSelection(): void {
+  cropSelection = { left: 0, top: 0, right: 100, bottom: 100 };
+  renderCropSelection();
+}
+
+function updateCropFlowUI(): void {
+  if (createCropFlowActive) {
+    cropStep.textContent = `Image ${createCropFlowIndex + 1}/${images.length}`;
+    cropApply.textContent =
+      createCropFlowIndex >= images.length - 1 ? "Start tagging" : "Next image";
+    cropCancel.textContent = "Cancel";
+  } else {
+    cropStep.textContent = "";
+    cropApply.textContent = "Apply";
+    cropCancel.textContent = "Cancel";
+  }
+}
+
+function openCropModalForActiveImage(): void {
+  if (!images.length) return;
+  cropOriginalImage = cloneEditorImage(getActiveImage());
+  cropWorkingImage = cloneEditorImage(getActiveImage());
+  cropPreview.src = cropWorkingImage.dataUrl;
+  cropMarkerModeEnabled = false;
+  updateCropMarkerUI();
+  resetCropSelection();
+  updateCropFlowUI();
+  cropModal.classList.add("open");
+  requestAnimationFrame(() => renderCropSelection());
+}
+
+function closeCropModal(): void {
+  cropModal.classList.remove("open");
+  activeCropHandle = null;
+  cropDrawingPointerId = null;
+  cropActiveStroke = null;
+  if (cropAutoZoomTimer !== null) {
+    window.clearTimeout(cropAutoZoomTimer);
+    cropAutoZoomTimer = null;
+  }
+}
+
+function getCropTargetRedactions(): RedactionStroke[] {
+  return (cropWorkingImage ?? getActiveImage()).redactions;
+}
+
+function scheduleCropAutoZoom(): void {
+  if (cropAutoZoomTimer !== null) {
+    window.clearTimeout(cropAutoZoomTimer);
+  }
+  cropAutoZoomTimer = window.setTimeout(() => {
+    cropAutoZoomTimer = null;
+    if (!cropModal.classList.contains("open") || !cropWorkingImage) return;
+    if (
+      cropSelection.left === 0 &&
+      cropSelection.top === 0 &&
+      cropSelection.right === 100 &&
+      cropSelection.bottom === 100
+    ) {
+      return;
+    }
+    void (async () => {
+      await cropImageInPlace(cropWorkingImage!, cropSelection);
+      resetCropSelection();
+      cropPreview.src = cropWorkingImage!.dataUrl;
+      renderCropSelection();
+    })();
+  }, 700);
+}
+
+function updateCropMarkerUI(): void {
+  cropMarkerToggle.classList.toggle("active", cropMarkerModeEnabled);
+  cropPreviewWrap.classList.toggle("marker-mode", cropMarkerModeEnabled);
+  cropMarkerToggle.setAttribute(
+    "aria-label",
+    cropMarkerModeEnabled ? "Disable redaction marker" : "Enable redaction marker",
+  );
+}
+
+function cropEventToImagePercent(event: PointerEvent): RedactionPoint | null {
+  const r = cropPreviewRect();
+  if (r.w <= 0 || r.h <= 0) return null;
+  const wrapRect = cropPreviewWrap.getBoundingClientRect();
+  const px = event.clientX - wrapRect.left - cropPreviewWrap.clientLeft;
+  const py = event.clientY - wrapRect.top - cropPreviewWrap.clientTop;
+  if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) {
+    return null;
+  }
+  return {
+    x: ((px - r.x) / r.w) * 100,
+    y: ((py - r.y) / r.h) * 100,
+  };
+}
+
+function onCropMarkerPointerMove(event: PointerEvent): void {
+  if (
+    !cropMarkerModeEnabled ||
+    cropDrawingPointerId !== event.pointerId ||
+    !cropActiveStroke
+  ) {
+    return;
+  }
+  event.preventDefault();
+  const point = cropEventToImagePercent(event);
+  if (!point) return;
+  const last = cropActiveStroke.points[cropActiveStroke.points.length - 1];
+  if (
+    last &&
+    Math.abs(last.x - point.x) < 0.08 &&
+    Math.abs(last.y - point.y) < 0.08
+  ) {
+    return;
+  }
+  cropActiveStroke.points.push(point);
+  renderCropSelection();
+}
+
+function onCropMarkerPointerUp(event: PointerEvent): void {
+  if (cropDrawingPointerId !== event.pointerId) return;
+  cropDrawingPointerId = null;
+  cropActiveStroke = null;
+  window.removeEventListener("pointermove", onCropMarkerPointerMove);
+  window.removeEventListener("pointerup", onCropMarkerPointerUp);
+  window.removeEventListener("pointercancel", onCropMarkerPointerUp);
+}
+
+function pointerEventToCropPct(event: PointerEvent): { x: number; y: number } | null {
+  const r = cropPreviewRect();
+  if (r.w <= 0 || r.h <= 0) return null;
+  const wrapRect = cropPreviewWrap.getBoundingClientRect();
+  const localX = event.clientX - wrapRect.left - cropPreviewWrap.clientLeft;
+  const localY = event.clientY - wrapRect.top - cropPreviewWrap.clientTop;
+  const x = ((localX - r.x) / r.w) * 100;
+  const y = ((localY - r.y) / r.h) * 100;
+  return { x: clampPct(x), y: clampPct(y) };
+}
+
+function mapPercentForCrop(valuePct: number, start: number, span: number): number {
+  return ((valuePct / 100 - start) / span) * 100;
+}
+
+function dominantSourceAxisLengthForDimensions(width: number, height: number): number {
+  const box = editorBoxSize();
+  const iw = Math.max(1, width || 1);
+  const ih = Math.max(1, height || 1);
+  const containScale = Math.min(box.width / iw, box.height / ih);
+  const renderedW = iw * containScale;
+  const renderedH = ih * containScale;
+  return renderedW >= renderedH ? iw : ih;
+}
+
+function clampPlacementToImageBounds(
+  xPct: number,
+  yPct: number,
+  radius: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const scaleBase = Math.max(width, height);
+  const sizePx = ((radius * 2) / 100) * scaleBase;
+  const half = sizePx / 2;
+  const minInsideHalf = half - sizePx / 3;
+  const minX = minInsideHalf;
+  const maxX = width - minInsideHalf;
+  const minY = minInsideHalf;
+  const maxY = height - minInsideHalf;
+  const px = (xPct / 100) * width;
+  const py = (yPct / 100) * height;
+  const clampedX = Math.min(Math.max(minX, px), Math.max(minX, maxX));
+  const clampedY = Math.min(Math.max(minY, py), Math.max(minY, maxY));
+  return {
+    x: (clampedX / Math.max(1, width)) * 100,
+    y: (clampedY / Math.max(1, height)) * 100,
+  };
+}
+
+async function applyCropToActiveImage(): Promise<void> {
+  const image = cropWorkingImage ?? getActiveImage();
+  await cropImageInPlace(image, cropSelection);
+
+  if (cropWorkingImage) {
+    images[activeImageIndex] = cloneEditorImage(cropWorkingImage);
+  }
+
+  normalizePlacementOrders();
+  if (selectedId) {
+    const stillExists = images[activeImageIndex]!.placements.some(
+      (placement) => placement.id === selectedId,
+    );
+    if (!stillExists) selectedId = null;
+  }
+
+  const firstPlacement = images[activeImageIndex]!.placements[0] ?? null;
+  if (firstPlacement?.radius != null) {
+    const mapped = clampGlobalRadius(
+      mapImageRadiusToUniformRadius(firstPlacement.radius, activeImageIndex),
+    );
+    imageRadiusByIndex[activeImageIndex] = mapped;
+    imageRadiusTouchedByIndex[activeImageIndex] = true;
+    globalRadius = mapped;
+    lastUsedRadius = mapped;
+    cmSize.value = String(mapped);
+  }
+
+  loadActiveImage(false);
+  scheduleEditorLayoutRefresh();
+}
+
+async function cropImageInPlace(
+  image: EditorImage,
+  selection: { left: number; top: number; right: number; bottom: number },
+): Promise<void> {
+  const leftN = selection.left / 100;
+  const rightN = selection.right / 100;
+  const topN = selection.top / 100;
+  const bottomN = selection.bottom / 100;
+  const spanX = rightN - leftN;
+  const spanY = bottomN - topN;
+
+  if (spanX <= 0 || spanY <= 0) return;
+  if (selection.left === 0 && selection.top === 0 && selection.right === 100 && selection.bottom === 100) {
+    return;
+  }
+
+  const source = await loadImage(image.dataUrl);
+  const srcW = image.width || source.naturalWidth || source.width;
+  const srcH = image.height || source.naturalHeight || source.height;
+  const sx = Math.max(0, Math.min(srcW - 1, Math.round(srcW * leftN)));
+  const sy = Math.max(0, Math.min(srcH - 1, Math.round(srcH * topN)));
+  const sw = Math.max(1, Math.round(srcW * spanX));
+  const sh = Math.max(1, Math.round(srcH * spanY));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  const mime = image.mime === "image/png" ? "image/png" : "image/jpeg";
+  const dataUrl = canvas.toDataURL(mime, mime === "image/jpeg" ? 0.98 : undefined);
+
+  const newImageBase = imageScaleBaseForDimensions(sw, sh);
+  const oldDominantSourceAxis = dominantSourceAxisLengthForDimensions(srcW, srcH);
+  const newDominantSourceAxis = dominantSourceAxisLengthForDimensions(sw, sh);
+  const sourceSizePreserveScale = oldDominantSourceAxis / Math.max(1, newDominantSourceAxis);
+
+  const mappedPlacements = image.placements
+    .map((placement) => {
+      const mappedX = mapPercentForCrop(placement.x, leftN, spanX);
+      const mappedY = mapPercentForCrop(placement.y, topN, spanY);
+      const currentRadius =
+        placement.radius ?? mapUniformRadiusToImageRadius(globalRadius, activeImageIndex);
+      const desiredRadius = currentRadius * sourceSizePreserveScale;
+      const currentUniform = mapImageRadiusToUniformRadiusForBase(
+        desiredRadius,
+        newImageBase,
+      );
+      const boundedUniform = clampGlobalRadius(currentUniform);
+      const boundedRadius = mapUniformRadiusToImageRadiusForBase(
+        boundedUniform,
+        newImageBase,
+      );
+      const clamped = clampPlacementToImageBounds(
+        mappedX,
+        mappedY,
+        boundedRadius,
+        sw,
+        sh,
+      );
+      return {
+        ...placement,
+        x: clamped.x,
+        y: clamped.y,
+        radius: boundedRadius,
+      } as BadgePlacement;
+    });
+
+  const mappedRedactions = image.redactions
+    .map((stroke) => {
+      const points = stroke.points.map((point) => {
+        const mappedX = mapPercentForCrop(point.x, leftN, spanX);
+        const mappedY = mapPercentForCrop(point.y, topN, spanY);
+        return { x: clampPct(mappedX), y: clampPct(mappedY) };
+      });
+      if (!points.length) return null;
+      return {
+        points,
+        widthPct: stroke.widthPct || REDACTION_STROKE_WIDTH_PCT,
+      } as RedactionStroke;
+    })
+    .filter((stroke): stroke is RedactionStroke => !!stroke);
+
+  image.dataUrl = dataUrl;
+  image.base64 = dataUrl.split(",")[1] ?? "";
+  image.mime = mime;
+  image.width = sw;
+  image.height = sh;
+  image.placements = mappedPlacements;
+  image.redactions = mappedRedactions;
+}
+
+function cloneEditorImage(image: EditorImage): EditorImage {
+  return {
+    dataUrl: image.dataUrl,
+    base64: image.base64,
+    mime: image.mime,
+    width: image.width,
+    height: image.height,
+    placements: image.placements.map((placement) => ({ ...placement })),
+    redactions: image.redactions.map((stroke) => ({
+      widthPct: stroke.widthPct,
+      points: stroke.points.map((point) => ({ ...point })),
+    })),
+  };
+}
+
 function syncActivePlacementRadiiFromSlider(): void {
   const image = images[activeImageIndex];
   if (!image) return;
@@ -353,6 +851,46 @@ function syncActivePlacementRadiiFromSlider(): void {
   for (const placement of image.placements) {
     placement.radius = mappedRadius;
   }
+}
+
+function startCreateCropFlow(): void {
+  if (!images.length) return;
+  createCropFlowActive = true;
+  createCropFlowIndex = 0;
+  activeImageIndex = 0;
+  openCropModalForActiveImage();
+}
+
+function cancelCreateCropFlow(): void {
+  createCropFlowActive = false;
+  createCropFlowIndex = 0;
+  images = [];
+  activeImageIndex = 0;
+  closeCropModal();
+  createModal.classList.remove("open");
+  detailsModal.classList.remove("open");
+  screenMode.style.display = "flex";
+}
+
+function advanceCreateCropFlow(): void {
+  if (!createCropFlowActive) return;
+  if (createCropFlowIndex < images.length - 1) {
+    createCropFlowIndex += 1;
+    activeImageIndex = createCropFlowIndex;
+    openCropModalForActiveImage();
+    return;
+  }
+  createCropFlowActive = false;
+  createCropFlowIndex = 0;
+  activeImageIndex = 0;
+  imageSlideDirection = null;
+  pendingCreateSlideImageSrc = null;
+  pendingCreateSlideBadges = null;
+  navTransitionInFlight = false;
+  queuedNavIndex = null;
+  cmImg.src = "";
+  closeCropModal();
+  openEditor();
 }
 
 btnVote.addEventListener("click", () => {
@@ -396,7 +934,7 @@ fileInput.addEventListener("change", async () => {
 
   images = built;
   activeImageIndex = 0;
-  openEditor();
+  startCreateCropFlow();
 
   fileInput.value = "";
 });
@@ -1202,6 +1740,159 @@ cmMarkerToggle.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
 });
 
+cmCrop.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!images.length || cropApplying) return;
+  createCropFlowActive = false;
+  openCropModalForActiveImage();
+});
+
+function beginCropHandleDrag(
+  handle: "tl" | "tr" | "bl" | "br",
+  event: PointerEvent,
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  activeCropHandle = handle;
+  window.addEventListener("pointermove", onCropHandlePointerMove);
+  window.addEventListener("pointerup", onCropHandlePointerUp, { once: true });
+}
+
+function onCropHandlePointerMove(event: PointerEvent): void {
+  if (!activeCropHandle) return;
+  const point = pointerEventToCropPct(event);
+  if (!point) return;
+  const minSize = MIN_CROP_SIZE_PCT;
+
+  if (activeCropHandle === "tl") {
+    cropSelection.left = Math.min(point.x, cropSelection.right - minSize);
+    cropSelection.top = Math.min(point.y, cropSelection.bottom - minSize);
+  } else if (activeCropHandle === "tr") {
+    cropSelection.right = Math.max(point.x, cropSelection.left + minSize);
+    cropSelection.top = Math.min(point.y, cropSelection.bottom - minSize);
+  } else if (activeCropHandle === "bl") {
+    cropSelection.left = Math.min(point.x, cropSelection.right - minSize);
+    cropSelection.bottom = Math.max(point.y, cropSelection.top + minSize);
+  } else {
+    cropSelection.right = Math.max(point.x, cropSelection.left + minSize);
+    cropSelection.bottom = Math.max(point.y, cropSelection.top + minSize);
+  }
+
+  cropSelection.left = clampPct(cropSelection.left);
+  cropSelection.top = clampPct(cropSelection.top);
+  cropSelection.right = clampPct(cropSelection.right);
+  cropSelection.bottom = clampPct(cropSelection.bottom);
+
+  renderCropSelection();
+  scheduleCropAutoZoom();
+}
+
+function onCropHandlePointerUp(): void {
+  activeCropHandle = null;
+  window.removeEventListener("pointermove", onCropHandlePointerMove);
+}
+
+cropHandleTl.addEventListener("pointerdown", (event) => {
+  beginCropHandleDrag("tl", event);
+});
+
+cropHandleTr.addEventListener("pointerdown", (event) => {
+  beginCropHandleDrag("tr", event);
+});
+
+cropHandleBl.addEventListener("pointerdown", (event) => {
+  beginCropHandleDrag("bl", event);
+});
+
+cropHandleBr.addEventListener("pointerdown", (event) => {
+  beginCropHandleDrag("br", event);
+});
+
+cropMarkerToggle.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  cropMarkerModeEnabled = !cropMarkerModeEnabled;
+  updateCropMarkerUI();
+});
+
+cropMarkerToggle.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+});
+
+cropPreviewWrap.addEventListener("pointerdown", (event) => {
+  if (!cropMarkerModeEnabled) return;
+  const target = event.target as HTMLElement;
+  if (target.closest("#crop-marker-toggle")) return;
+  const point = cropEventToImagePercent(event);
+  if (!point) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const stroke: RedactionStroke = {
+    points: [point],
+    widthPct: REDACTION_STROKE_WIDTH_PCT,
+  };
+  getCropTargetRedactions().push(stroke);
+  cropActiveStroke = stroke;
+  cropDrawingPointerId = event.pointerId;
+
+  window.addEventListener("pointermove", onCropMarkerPointerMove);
+  window.addEventListener("pointerup", onCropMarkerPointerUp);
+  window.addEventListener("pointercancel", onCropMarkerPointerUp);
+  renderCropSelection();
+});
+
+cropReset.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (cropOriginalImage) {
+    cropWorkingImage = cloneEditorImage(cropOriginalImage);
+    cropPreview.src = cropWorkingImage.dataUrl;
+  }
+  resetCropSelection();
+});
+
+cropCancel.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (createCropFlowActive) {
+    cancelCreateCropFlow();
+    return;
+  }
+  closeCropModal();
+});
+
+cropBg.addEventListener("click", () => {
+  if (createCropFlowActive) {
+    cancelCreateCropFlow();
+    return;
+  }
+  closeCropModal();
+});
+
+cropApply.addEventListener("click", async (event) => {
+  event.preventDefault();
+  if (cropApplying || !images.length) return;
+  cropApplying = true;
+  try {
+    submitOvl.style.display = "flex";
+    submitText.textContent = "Cropping image…";
+    await applyCropToActiveImage();
+    submitOvl.style.display = "none";
+    if (createCropFlowActive) {
+      advanceCreateCropFlow();
+    } else {
+      closeCropModal();
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Failed to crop image.");
+  } finally {
+    submitOvl.style.display = "none";
+    cropApplying = false;
+  }
+});
+
 cmSize.addEventListener("input", () => {
   globalRadius = clampGlobalRadius(Number(cmSize.value) || globalRadius);
   lastUsedRadius = globalRadius;
@@ -1215,21 +1906,35 @@ cmImg.addEventListener("load", () => {
   scheduleEditorLayoutRefresh();
 });
 
+cropPreview.addEventListener("load", () => {
+  renderCropSelection();
+});
+
+function openDetailsForPosting(): void {
+  sideRow.style.display = "flex";
+  otherRow.style.display =
+    mode === "vote" && eloSide === "other" ? "flex" : "none";
+  detailsModal.classList.add("open");
+  updateSideUI();
+}
+
 cmNext.addEventListener("click", () => {
   if (cmNext.disabled) return;
   if (isEditSession) {
     void submitEditSession();
     return;
   }
+  const hasMissingImageBadges =
+    images.length > 1 && images.some((img) => img.placements.length === 0);
+  if (hasMissingImageBadges) {
+    missingImageModal.classList.add("open");
+    return;
+  }
   if (getTotalPlacements() === 1) {
     singleBadgeModal.classList.add("open");
     return;
   }
-  sideRow.style.display = "flex";
-  otherRow.style.display =
-    mode === "vote" && eloSide === "other" ? "flex" : "none";
-  detailsModal.classList.add("open");
-  updateSideUI();
+  openDetailsForPosting();
 });
 
 singleBadgeBg.addEventListener("click", () => {
@@ -1242,11 +1947,20 @@ singleBadgeCancel.addEventListener("click", () => {
 
 singleBadgeContinue.addEventListener("click", () => {
   singleBadgeModal.classList.remove("open");
-  sideRow.style.display = "flex";
-  otherRow.style.display =
-    mode === "vote" && eloSide === "other" ? "flex" : "none";
-  detailsModal.classList.add("open");
-  updateSideUI();
+  openDetailsForPosting();
+});
+
+missingImageBg.addEventListener("click", () => {
+  missingImageModal.classList.remove("open");
+});
+
+missingImageCancel.addEventListener("click", () => {
+  missingImageModal.classList.remove("open");
+});
+
+missingImageContinue.addEventListener("click", () => {
+  missingImageModal.classList.remove("open");
+  openDetailsForPosting();
 });
 
 detailsBg.addEventListener("click", () =>
@@ -1650,6 +2364,9 @@ pickerBg.addEventListener("click", (event) => {
 });
 window.addEventListener("resize", () => {
   scheduleEditorLayoutRefresh();
+  if (cropModal.classList.contains("open")) {
+    renderCropSelection();
+  }
 });
 
 if (typeof ResizeObserver !== "undefined") {

@@ -13,7 +13,7 @@
   --tt-bg: light-dark(#ffffff, #0c1416);
   --tt-fg: light-dark(#1f2937, #f2f4f5);
   --tt-panel: light-dark(#ffffff, #0c1416);
-  --tt-panel-strong: light-dark(#f6f7f8, #172126);
+  --tt-panel-strong: light-dark(#f6f7f8, #0c1416);
   --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
   --tt-text-muted: light-dark(#5b6573, #aeb7c2);
@@ -335,7 +335,7 @@ html.tt-edit-boot #overlay-submit {
   bottom: 62px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.68);
+  background: rgba(0, 0, 0, 0.9);
   color: #ddd;
   font-size: 14px;
   padding: 7px 12px;
@@ -381,6 +381,23 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .cm-mini-btn:active {
+  transform: scale(0.98);
+}
+
+.cm-crop-btn {
+  height: 36px;
+  min-width: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--tt-input-border);
+  background: var(--tt-input-bg);
+  color: var(--tt-fg);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.cm-crop-btn:active {
   transform: scale(0.98);
 }
 
@@ -894,7 +911,7 @@ html.tt-edit-boot #overlay-submit {
 
 .pk-label {
   font-size: 10px;
-  color: var(--tt-text-muted);
+  color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
   text-align: center;
   min-width: 66px;
   white-space: nowrap;
@@ -933,7 +950,7 @@ html.tt-edit-boot #overlay-submit {
   padding: 10px 12px;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--tt-text-muted);
+  color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
   z-index: 300;
   max-width: 240px;
   pointer-events: none;
@@ -955,6 +972,235 @@ html.tt-edit-boot #overlay-submit {
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
   border-top: 5px solid var(--tt-border);
+}
+
+.crop-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+}
+
+.crop-modal.open {
+  display: block;
+}
+
+.crop-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.crop-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--tt-panel);
+  border: none;
+  border-radius: 0;
+  padding: max(10px, env(safe-area-inset-top)) 10px
+    max(10px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.crop-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.crop-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--tt-fg);
+}
+
+.crop-reset-btn {
+  margin-left: auto;
+  border: 1px solid var(--tt-input-border);
+  background: var(--tt-input-bg);
+  color: var(--tt-fg);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.crop-step {
+  font-size: 11px;
+  color: var(--tt-text-muted);
+  font-weight: 700;
+}
+
+.crop-preview-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+  border-radius: 10px;
+  border: 1px solid var(--tt-border-weak);
+  overflow: visible;
+  background: light-dark(#f3f6f8, #0a1012);
+}
+
+.crop-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.crop-redact-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.crop-badges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.crop-mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.crop-mask-seg {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.crop-badge {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border: 1px solid color-mix(in srgb, var(--tt-accent-bg) 55%, transparent);
+}
+
+.crop-marker-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 8;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid
+    color-mix(in srgb, var(--tt-accent-bg) 35%, var(--tt-border));
+  background: var(--tt-panel-strong);
+  color: var(--tt-fg);
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+}
+
+.crop-marker-toggle.active {
+  background: var(--tt-accent-bg);
+  border-color: var(--tt-accent-bg);
+  color: var(--tt-accent-fg);
+}
+
+.crop-box {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border: 2px solid var(--tt-accent-bg);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.crop-preview-wrap.marker-mode .crop-box,
+.crop-preview-wrap.marker-mode .crop-handle {
+  pointer-events: none;
+}
+
+.crop-preview-wrap.marker-mode .crop-redact-layer {
+  pointer-events: auto;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--tt-accent-bg);
+  background: light-dark(#ffffff, #0c1416);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  cursor: grab;
+}
+
+.crop-handle:active {
+  cursor: grabbing;
+}
+
+.crop-handle.tl {
+  left: -17px;
+  top: -17px;
+}
+
+.crop-handle.tr {
+  right: -17px;
+  top: -17px;
+}
+
+.crop-handle.bl {
+  left: -17px;
+  bottom: -17px;
+}
+
+.crop-handle.br {
+  right: -17px;
+  bottom: -17px;
+}
+
+.crop-note {
+  color: var(--tt-text-muted);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  flex: 1;
+}
+
+.crop-note-line {
+  display: block;
+}
+
+.crop-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 @keyframes spin {
