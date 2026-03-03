@@ -331,7 +331,10 @@ function interquartileVoteMassByClassification(
   total: number;
 } {
   const byClassification: Partial<Record<Classification, number>> = {};
-  const buckets = new Map<number, { total: number; byClass: Map<Classification, number> }>();
+  const buckets = new Map<
+    number,
+    { total: number; byClass: Map<Classification, number> }
+  >();
   let n = 0;
 
   for (const [classification, rawCount] of Object.entries(voteCounts)) {
@@ -342,7 +345,10 @@ function interquartileVoteMassByClassification(
     const bucket =
       buckets.get(weight) ??
       (() => {
-        const created = { total: 0, byClass: new Map<Classification, number>() };
+        const created = {
+          total: 0,
+          byClass: new Map<Classification, number>(),
+        };
         buckets.set(weight, created);
         return created;
       })();
