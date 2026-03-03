@@ -10,10 +10,10 @@
 
 :root {
   color-scheme: light dark;
-  --tt-bg: light-dark(#ffffff, #0c1416);
+  --tt-bg: light-dark(#ffffff, #111317);
   --tt-fg: light-dark(#1f2937, #f2f4f5);
-  --tt-panel: light-dark(#ffffff, #0c1416);
-  --tt-panel-strong: light-dark(#f6f7f8, #0c1416);
+  --tt-panel: light-dark(#ffffff, #111317);
+  --tt-panel-strong: light-dark(#f6f7f8, #111317);
   --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
   --tt-text-muted: light-dark(#5b6573, #aeb7c2);
@@ -1045,7 +1045,7 @@ html.tt-edit-boot #overlay-submit {
   border-radius: 10px;
   border: 1px solid var(--tt-border-weak);
   overflow: visible;
-  background: light-dark(#f3f6f8, #0a1012);
+  background: light-dark(#f3f6f8, #101317);
 }
 
 .crop-preview {

@@ -10,10 +10,10 @@
 
 :root {
   color-scheme: light dark;
-  --tt-bg: light-dark(#ffffff, #0c1416);
+  --tt-bg: light-dark(#ffffff, #111317);
   --tt-fg: light-dark(#1f2937, #f2f4f5);
-  --tt-panel: light-dark(#ffffff, #0c1416);
-  --tt-panel-strong: light-dark(#f6f7f8, #0c1416);
+  --tt-panel: light-dark(#ffffff, #111317);
+  --tt-panel-strong: light-dark(#f6f7f8, #111317);
   --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
   --tt-accent-bg: #26c2a3;

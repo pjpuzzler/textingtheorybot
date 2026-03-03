@@ -47,6 +47,17 @@ let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
 const UNVOTED_RING_WIDTH_PX = 1.5;
+const VOTE_TAP_MAX_MOVE_PX = 12;
+const VOTE_TAP_MAX_DURATION_MS = 350;
+
+let pendingVoteTap: {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startedAt: number;
+  badge: BadgePlacement;
+  cancelled: boolean;
+} | null = null;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -124,6 +135,39 @@ function applyBadgeVisibility(): void {
     "aria-label",
     badgesVisible ? "Hide badges" : "Show badges",
   );
+}
+
+function clearPendingVoteTap(): void {
+  pendingVoteTap = null;
+  window.removeEventListener("pointermove", onVoteTapPointerMove);
+  window.removeEventListener("pointerup", onVoteTapPointerUp);
+  window.removeEventListener("pointercancel", onVoteTapPointerCancel);
+}
+
+function onVoteTapPointerMove(event: PointerEvent): void {
+  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
+  const dx = event.clientX - pendingVoteTap.startX;
+  const dy = event.clientY - pendingVoteTap.startY;
+  if (Math.hypot(dx, dy) > VOTE_TAP_MAX_MOVE_PX) {
+    pendingVoteTap.cancelled = true;
+  }
+}
+
+function onVoteTapPointerCancel(event: PointerEvent): void {
+  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
+  clearPendingVoteTap();
+}
+
+function onVoteTapPointerUp(event: PointerEvent): void {
+  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
+  const voteBadgePlacement = pendingVoteTap.badge;
+  const durationMs = Date.now() - pendingVoteTap.startedAt;
+  const shouldOpen =
+    !pendingVoteTap.cancelled && durationMs <= VOTE_TAP_MAX_DURATION_MS;
+  clearPendingVoteTap();
+  if (!shouldOpen) return;
+  markUserInteraction();
+  openPicker(voteBadgePlacement);
 }
 
 function markUserInteraction(): void {
@@ -333,6 +377,8 @@ async function init() {
     });
     if (isExpandedView) {
       quickCreateBtn.style.display = "none";
+      badgeVisToggleBtn.style.display = "none";
+      modEditBtn.style.display = "none";
     }
 
     if (viewerIsModerator) {
@@ -771,8 +817,18 @@ function layoutBadges(force = false) {
       el.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        markUserInteraction();
-        openPicker(p);
+        clearPendingVoteTap();
+        pendingVoteTap = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          startedAt: Date.now(),
+          badge: p,
+          cancelled: false,
+        };
+        window.addEventListener("pointermove", onVoteTapPointerMove);
+        window.addEventListener("pointerup", onVoteTapPointerUp);
+        window.addEventListener("pointercancel", onVoteTapPointerCancel);
       });
       el.addEventListener("click", (event) => {
         event.preventDefault();
@@ -817,7 +873,7 @@ function openPicker(p: BadgePlacement) {
   markUserInteraction();
   const currentVote = userVotes[p.id];
 
-  pickerTitle.textContent = "Vote for Classification";
+  pickerTitle.textContent = "Vote for Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   activeHintEl = null;
 
