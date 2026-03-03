@@ -249,7 +249,7 @@ html.tt-edit-boot #overlay-submit {
 .img-dots {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 30px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -322,8 +322,8 @@ html.tt-edit-boot #overlay-submit {
   right: 8px;
   z-index: 4;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 2px 7px;
+  font-size: 11px;
   font-weight: 700;
   color: #fff;
   background: rgba(0, 0, 0, 0.52);

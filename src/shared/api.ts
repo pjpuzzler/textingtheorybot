@@ -257,10 +257,7 @@ export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];
 
 // --- Consensus helpers ---
 
-export const BOOK_MIN_SHARE = 0.5;
-export const BOOK_IQM_RANGE = [-1, 1] as const; // exclusive
-export const MISS_MIN_SHARE = 0.5;
-export const MISS_IQM_RANGE = [-2, 0] as const; // exclusive
+export const BOOK_MISS_IQM_MAJORITY = 0.5;
 export const INTERESTING_STD_DEV_THRESHOLD = 1.5;
 
 /**
@@ -295,29 +292,25 @@ export function iqmToClassification(
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
 ): Classification {
-  const stdDev = weightedStdDev(voteCounts, totalVotes);
+  const stdDev = interquartileWeightedStdDev(voteCounts, totalVotes);
   if (stdDev >= INTERESTING_STD_DEV_THRESHOLD) {
     return Classification.INTERESTING;
   }
 
-  // Special: Book
-  const bookShare = (voteCounts[Classification.BOOK] ?? 0) / totalVotes;
-  if (
-    bookShare > BOOK_MIN_SHARE &&
-    iqm > BOOK_IQM_RANGE[0] &&
-    iqm < BOOK_IQM_RANGE[1]
-  ) {
-    return Classification.BOOK;
-  }
+  const iqmVoteMass = interquartileVoteMassByClassification(voteCounts);
+  const iqmTotalVotes = Math.max(0, iqmVoteMass.total);
+  if (iqmTotalVotes > 0) {
+    const bookIqmShare =
+      (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
+    if (bookIqmShare > BOOK_MISS_IQM_MAJORITY) {
+      return Classification.BOOK;
+    }
 
-  // Special: Miss
-  const missShare = (voteCounts[Classification.MISS] ?? 0) / totalVotes;
-  if (
-    missShare > MISS_MIN_SHARE &&
-    iqm > MISS_IQM_RANGE[0] &&
-    iqm < MISS_IQM_RANGE[1]
-  ) {
-    return Classification.MISS;
+    const missIqmShare =
+      (iqmVoteMass.byClassification[Classification.MISS] ?? 0) / iqmTotalVotes;
+    if (missIqmShare > BOOK_MISS_IQM_MAJORITY) {
+      return Classification.MISS;
+    }
   }
 
   // Standard mapping
@@ -331,29 +324,132 @@ export function iqmToClassification(
   return Classification.BLUNDER;
 }
 
-function weightedStdDev(
+function interquartileVoteMassByClassification(
+  voteCounts: Partial<Record<Classification, number>>,
+): {
+  byClassification: Partial<Record<Classification, number>>;
+  total: number;
+} {
+  const byClassification: Partial<Record<Classification, number>> = {};
+  const buckets = new Map<number, { total: number; byClass: Map<Classification, number> }>();
+  let n = 0;
+
+  for (const [classification, rawCount] of Object.entries(voteCounts)) {
+    const cls = classification as Classification;
+    const count = rawCount ?? 0;
+    if (count <= 0) continue;
+    const weight = CLASSIFICATION_WEIGHT[cls] ?? 0;
+    const bucket =
+      buckets.get(weight) ??
+      (() => {
+        const created = { total: 0, byClass: new Map<Classification, number>() };
+        buckets.set(weight, created);
+        return created;
+      })();
+    bucket.total += count;
+    bucket.byClass.set(cls, (bucket.byClass.get(cls) ?? 0) + count);
+    n += count;
+  }
+
+  if (n <= 0) {
+    return { byClassification, total: 0 };
+  }
+
+  const trimAmount = n * 0.25;
+  let lowerTrimRemaining = trimAmount;
+  let upperTrimRemaining = trimAmount;
+  const weightsAsc = [...buckets.keys()].sort((a, b) => a - b);
+  const lowerTrimByWeight = new Map<number, number>();
+  const upperTrimByWeight = new Map<number, number>();
+
+  for (const weight of weightsAsc) {
+    if (lowerTrimRemaining <= 0) break;
+    const bucket = buckets.get(weight);
+    if (!bucket) continue;
+    const trimmed = Math.min(lowerTrimRemaining, bucket.total);
+    if (trimmed > 0) {
+      lowerTrimByWeight.set(weight, trimmed);
+      lowerTrimRemaining -= trimmed;
+    }
+  }
+
+  for (let index = weightsAsc.length - 1; index >= 0; index -= 1) {
+    if (upperTrimRemaining <= 0) break;
+    const weight = weightsAsc[index]!;
+    const bucket = buckets.get(weight);
+    if (!bucket) continue;
+    const trimmed = Math.min(upperTrimRemaining, bucket.total);
+    if (trimmed > 0) {
+      upperTrimByWeight.set(weight, trimmed);
+      upperTrimRemaining -= trimmed;
+    }
+  }
+
+  for (const weight of weightsAsc) {
+    const bucket = buckets.get(weight);
+    if (!bucket || bucket.total <= 0) continue;
+
+    const lowerTrim = lowerTrimByWeight.get(weight) ?? 0;
+    const upperTrim = upperTrimByWeight.get(weight) ?? 0;
+    const included = Math.max(0, bucket.total - lowerTrim - upperTrim);
+    if (included <= 0) continue;
+
+    for (const [cls, classCount] of bucket.byClass.entries()) {
+      if (classCount <= 0) continue;
+      const classShareInBucket = classCount / bucket.total;
+      const includedForClass = included * classShareInBucket;
+      byClassification[cls] = (byClassification[cls] ?? 0) + includedForClass;
+    }
+  }
+
+  const total = Math.max(0, n - 2 * trimAmount);
+  return { byClassification, total };
+}
+
+function interquartileWeightedStdDev(
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
 ): number {
-  if (totalVotes <= 0) return 0;
-  let weightedSum = 0;
+  if (totalVotes <= 1) return 0;
+
+  const values: number[] = [];
   for (const [classification, count] of Object.entries(voteCounts)) {
     const votes = count ?? 0;
     if (votes <= 0) continue;
     const weight = CLASSIFICATION_WEIGHT[classification as Classification] ?? 0;
-    weightedSum += votes * weight;
+    for (let i = 0; i < votes; i++) values.push(weight);
   }
-  const mean = weightedSum / totalVotes;
+
+  if (values.length <= 1) return 0;
+  const n = values.length;
+  const sorted = values.sort((a, b) => a - b);
+  const trimProportion = 0.25;
+  const trimAmount = n * trimProportion;
+  const k = Math.floor(trimAmount);
+  const g = trimAmount - k;
+  const boundaryWeight = 1 - g;
+  const totalWeight = n - 2 * trimAmount;
+  if (totalWeight <= 0) return 0;
+
+  let weightedSum = 0;
+  for (let index = k + 1; index <= n - (k + 1) - 1; index++) {
+    weightedSum += sorted[index]!;
+  }
+  weightedSum += sorted[k]! * boundaryWeight;
+  weightedSum += sorted[n - 1 - k]! * boundaryWeight;
+  const mean = weightedSum / totalWeight;
 
   let weightedVarianceSum = 0;
-  for (const [classification, count] of Object.entries(voteCounts)) {
-    const votes = count ?? 0;
-    if (votes <= 0) continue;
-    const weight = CLASSIFICATION_WEIGHT[classification as Classification] ?? 0;
-    const diff = weight - mean;
-    weightedVarianceSum += votes * diff * diff;
+  for (let index = k + 1; index <= n - (k + 1) - 1; index++) {
+    const diff = sorted[index]! - mean;
+    weightedVarianceSum += diff * diff;
   }
-  return Math.sqrt(weightedVarianceSum / totalVotes);
+  const lowDiff = sorted[k]! - mean;
+  const highDiff = sorted[n - 1 - k]! - mean;
+  weightedVarianceSum += boundaryWeight * lowDiff * lowDiff;
+  weightedVarianceSum += boundaryWeight * highDiff * highDiff;
+
+  return Math.sqrt(weightedVarianceSum / totalWeight);
 }
 
 /** Interpolate ELO color from color stops */

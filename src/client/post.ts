@@ -49,6 +49,7 @@ const ELO_THUMB_SIZE_PX = 24;
 const UNVOTED_RING_WIDTH_PX = 1.5;
 const VOTE_TAP_MAX_MOVE_PX = 12;
 const VOTE_TAP_MAX_DURATION_MS = 350;
+const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
 
 let pendingVoteTap: {
   pointerId: number;
@@ -367,6 +368,9 @@ async function init() {
       badgesVisible = !badgesVisible;
       applyBadgeVisibility();
     });
+    if (!BADGE_VISIBILITY_TOGGLE_ENABLED) {
+      badgeVisToggleBtn.style.display = "none";
+    }
     applyBadgeVisibility();
     quickCreateBtn.addEventListener("click", (event) => {
       try {
@@ -381,7 +385,7 @@ async function init() {
       modEditBtn.style.display = "none";
     }
 
-    if (viewerIsModerator) {
+    if (viewerIsModerator && !isExpandedView) {
       modEditBtn.style.display = "inline-flex";
       modEditBtn.addEventListener("click", (event) => {
         event.preventDefault();

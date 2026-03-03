@@ -139,32 +139,32 @@ body {
 .img-dots {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 28px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  max-width: min(220px, calc(100vw - 140px));
+  gap: 4px;
+  max-width: min(180px, calc(100vw - 150px));
   overflow: hidden;
   background: rgba(0, 0, 0, 0.48);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 3px 8px;
   pointer-events: auto;
 }
 
 .img-dot {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.62);
   border: none;
 }
 
 .img-dot.active {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   background: #fff;
 }
 
@@ -212,8 +212,8 @@ body {
   right: 8px;
   z-index: 4;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 2px 7px;
+  font-size: 11px;
   font-weight: 700;
   color: #fff;
   background: rgba(0, 0, 0, 0.52);
@@ -226,12 +226,12 @@ body {
   left: 8px;
   z-index: 4;
   border-radius: 999px;
-  width: 34px;
-  height: 26px;
+  width: 30px;
+  height: 22px;
   border: 1px solid var(--tt-border);
   background: var(--tt-accent-bg);
   color: var(--tt-accent-fg);
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
   font-weight: 700;
   display: inline-flex;
@@ -250,13 +250,13 @@ body {
   bottom: 10px;
   z-index: 4;
   border-radius: 999px;
-  min-width: 58px;
-  height: 34px;
-  padding: 0 12px;
+  min-width: 50px;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.3);
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
   display: inline-flex;
@@ -270,6 +270,7 @@ body {
 }
 
 .badge-visibility {
+  display: none !important;
   position: absolute;
   right: 10px;
   bottom: 10px;
