@@ -47,18 +47,11 @@ let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
 const UNVOTED_RING_WIDTH_PX = 1.5;
-const VOTE_TAP_MAX_MOVE_PX = 12;
-const VOTE_TAP_MAX_DURATION_MS = 350;
 const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
-
-let pendingVoteTap: {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  startedAt: number;
-  badge: BadgePlacement;
-  cancelled: boolean;
-} | null = null;
+const PICKER_ITEM_CLICK_FALLBACK_GUARD_MS = 500;
+const PICKER_CLOSE_GUARD_AFTER_OPEN_MS = 180;
+let lastPickerOpenAt = 0;
+let lastPickerItemVoteAt = 0;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -91,6 +84,23 @@ const query = new URLSearchParams(window.location.search);
 const isExpandedView =
   query.get("expanded") === "1" ||
   window.location.pathname.endsWith("/post-expanded.html");
+
+function resetPostTransientOverlays(): void {
+  pickerOvl.classList.remove("open");
+}
+
+resetPostTransientOverlays();
+window.addEventListener("pageshow", () => {
+  resetPostTransientOverlays();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    resetPostTransientOverlays();
+  }
+});
+window.addEventListener("focus", () => {
+  resetPostTransientOverlays();
+});
 
 async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
@@ -136,39 +146,6 @@ function applyBadgeVisibility(): void {
     "aria-label",
     badgesVisible ? "Hide badges" : "Show badges",
   );
-}
-
-function clearPendingVoteTap(): void {
-  pendingVoteTap = null;
-  window.removeEventListener("pointermove", onVoteTapPointerMove);
-  window.removeEventListener("pointerup", onVoteTapPointerUp);
-  window.removeEventListener("pointercancel", onVoteTapPointerCancel);
-}
-
-function onVoteTapPointerMove(event: PointerEvent): void {
-  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
-  const dx = event.clientX - pendingVoteTap.startX;
-  const dy = event.clientY - pendingVoteTap.startY;
-  if (Math.hypot(dx, dy) > VOTE_TAP_MAX_MOVE_PX) {
-    pendingVoteTap.cancelled = true;
-  }
-}
-
-function onVoteTapPointerCancel(event: PointerEvent): void {
-  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
-  clearPendingVoteTap();
-}
-
-function onVoteTapPointerUp(event: PointerEvent): void {
-  if (!pendingVoteTap || event.pointerId !== pendingVoteTap.pointerId) return;
-  const voteBadgePlacement = pendingVoteTap.badge;
-  const durationMs = Date.now() - pendingVoteTap.startedAt;
-  const shouldOpen =
-    !pendingVoteTap.cancelled && durationMs <= VOTE_TAP_MAX_DURATION_MS;
-  clearPendingVoteTap();
-  if (!shouldOpen) return;
-  markUserInteraction();
-  openPicker(voteBadgePlacement);
 }
 
 function markUserInteraction(): void {
@@ -709,6 +686,9 @@ canvasEl.addEventListener("click", (event) => {
   if (isExpandedView) {
     return;
   }
+  if (pickerOvl.classList.contains("open")) {
+    return;
+  }
   if (Date.now() < suppressCanvasExpandUntil) {
     return;
   }
@@ -818,25 +798,11 @@ function layoutBadges(force = false) {
     }
 
     if (pd.mode === "vote" && canVoteOnCurrentPost()) {
-      el.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        clearPendingVoteTap();
-        pendingVoteTap = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          startedAt: Date.now(),
-          badge: p,
-          cancelled: false,
-        };
-        window.addEventListener("pointermove", onVoteTapPointerMove);
-        window.addEventListener("pointerup", onVoteTapPointerUp);
-        window.addEventListener("pointercancel", onVoteTapPointerCancel);
-      });
       el.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        markUserInteraction();
+        openPicker(p);
       });
     }
 
@@ -875,6 +841,8 @@ function isBookValidForVote(p: BadgePlacement): boolean {
 function openPicker(p: BadgePlacement) {
   if (!canVoteOnCurrentPost()) return;
   markUserInteraction();
+  suppressCanvasExpandUntil = Date.now() + 900;
+  lastPickerOpenAt = Date.now();
   const currentVote = userVotes[p.id];
 
   pickerTitle.textContent = "Vote for Classification (Best → Worst)";
@@ -956,6 +924,17 @@ function createPickerItem(
     event.stopPropagation();
     markUserInteraction();
     if (disabled) return;
+    lastPickerItemVoteAt = Date.now();
+    voteBadge(p, cls);
+  });
+  item.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (disabled) return;
+    if (Date.now() - lastPickerItemVoteAt < PICKER_ITEM_CLICK_FALLBACK_GUARD_MS) {
+      return;
+    }
+    markUserInteraction();
     voteBadge(p, cls);
   });
   return item;
@@ -1015,15 +994,31 @@ function closePicker() {
 }
 
 pickerBg.addEventListener("pointerdown", (event) => {
+  if (Date.now() - lastPickerOpenAt < PICKER_CLOSE_GUARD_AFTER_OPEN_MS) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
-  suppressCanvasExpandUntil = Date.now() + 450;
+  suppressCanvasExpandUntil = Date.now() + 120;
   closePicker();
 });
 pickerBg.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  suppressCanvasExpandUntil = Date.now() + 450;
+  // pointerdown handles close; click is consumed to prevent canvas expand.
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!pickerOvl.classList.contains("open")) return;
+  if (Date.now() - lastPickerOpenAt < PICKER_CLOSE_GUARD_AFTER_OPEN_MS) {
+    return;
+  }
+  const target = event.target as HTMLElement;
+  if (target.closest(".picker-sheet") || target.closest(".badge")) {
+    return;
+  }
   closePicker();
 });
 
@@ -1033,6 +1028,7 @@ async function voteBadge(p: BadgePlacement, cls: Classification) {
   }
 
   const previousVote = userVotes[p.id];
+  suppressCanvasExpandUntil = Date.now() + 320;
   closePicker();
   userVotes[p.id] = cls;
   localVoteGraceUntil[p.id] = Date.now() + 15000;

@@ -46,6 +46,7 @@ const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 150;
 const MIN_CROP_SIZE_PCT = 8;
+const EDITOR_PICKER_BACKDROP_GUARD_MS = 900;
 
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
@@ -183,6 +184,31 @@ const cropApply = $("crop-apply") as HTMLButtonElement;
 let pendingNewAnnotation: BadgePlacement | null = null;
 let suppressEditorPickerUntil = 0;
 
+function resetTransientOverlays(): void {
+  pickerModal.classList.remove("open");
+  detailsModal.classList.remove("open");
+  singleBadgeModal.classList.remove("open");
+  missingImageModal.classList.remove("open");
+  cropModal.classList.remove("open");
+  if (!isSubmitting && !isEditBootRequested) {
+    submitOvl.style.display = "none";
+  }
+}
+
+resetTransientOverlays();
+window.addEventListener("pageshow", () => {
+  resetTransientOverlays();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    resetTransientOverlays();
+  }
+});
+window.addEventListener("focus", () => {
+  resetTransientOverlays();
+});
+let suppressEditorPickerBackdropUntil = 0;
+
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const TITLE_FORBIDDEN_CHARS_REGEX = /[\[\]]/g;
 const query = new URLSearchParams(window.location.search);
@@ -195,6 +221,9 @@ if (isEditBootRequested) {
   createModal.classList.add("open");
   submitOvl.style.display = "flex";
   submitText.textContent = "Loading editor…";
+} else {
+  document.documentElement.classList.remove("tt-edit-boot");
+  submitOvl.style.display = "none";
 }
 
 function sanitizeOtherEloLabel(value: string): string {
@@ -865,9 +894,10 @@ function cloneEditorImage(image: EditorImage): EditorImage {
   };
 }
 
-function syncActivePlacementRadiiFromSlider(): void {
+function syncActivePlacementRadiiFromSlider(applyToPlacements = true): void {
   const image = images[activeImageIndex];
   if (!image) return;
+  if (!applyToPlacements) return;
   const mappedRadius = mapUniformRadiusToImageRadius(
     globalRadius,
     activeImageIndex,
@@ -1052,6 +1082,7 @@ function openEditor() {
   document.title = "Creating Texting Theory Post";
   screenMode.style.display = "none";
   createModal.classList.add("open");
+  submitOvl.style.display = "none";
   //   hintEl.textContent =
   //     mode === "annotated"
   //       ? "Tap to place a badge by every relevant message. Don't cover anything important."
@@ -1922,8 +1953,18 @@ cmSize.addEventListener("input", () => {
   lastUsedRadius = globalRadius;
   imageRadiusByIndex[activeImageIndex] = globalRadius;
   imageRadiusTouchedByIndex[activeImageIndex] = true;
-  syncActivePlacementRadiiFromSlider();
+  syncActivePlacementRadiiFromSlider(false);
+});
+
+function commitSliderVisualUpdate(): void {
+  syncActivePlacementRadiiFromSlider(true);
   render();
+}
+
+cmSize.addEventListener("change", commitSliderVisualUpdate);
+cmSize.addEventListener("pointerup", commitSliderVisualUpdate);
+cmSize.addEventListener("touchend", commitSliderVisualUpdate, {
+  passive: true,
 });
 
 cmImg.addEventListener("load", () => {
@@ -2232,8 +2273,10 @@ function isBookValid(p: BadgePlacement): boolean {
 }
 
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
-  pickerTitle.textContent = "Choose Classification";
+  pickerTitle.textContent = "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
+  suppressEditorPickerUntil = Date.now() + 900;
+  suppressEditorPickerBackdropUntil = Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
   grid.className = "pk-grid";
@@ -2375,15 +2418,34 @@ function closePicker() {
 }
 
 pickerBg.addEventListener("pointerdown", (event) => {
+  if (Date.now() < suppressEditorPickerBackdropUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   suppressEditorPickerUntil = Date.now() + 450;
   closePicker();
 });
 pickerBg.addEventListener("click", (event) => {
+  if (Date.now() < suppressEditorPickerBackdropUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   suppressEditorPickerUntil = Date.now() + 450;
+  closePicker();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!pickerModal.classList.contains("open")) return;
+  const target = event.target as HTMLElement;
+  if (target.closest(".picker-sheet") || target.closest(".ed-badge")) {
+    return;
+  }
   closePicker();
 });
 window.addEventListener("resize", () => {

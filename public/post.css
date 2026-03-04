@@ -10,19 +10,28 @@
 
 :root {
   color-scheme: light dark;
-  --tt-bg: light-dark(#ffffff, #111317);
-  --tt-fg: light-dark(#1f2937, #f2f4f5);
-  --tt-panel: light-dark(#ffffff, #111317);
-  --tt-panel-strong: light-dark(#f6f7f8, #111317);
-  --tt-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
-  --tt-border-weak: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --tt-bg: #ffffff;
+  --tt-fg: #1f2937;
+  --tt-panel: #ffffff;
+  --tt-panel-strong: #f6f7f8;
+  --tt-border: rgba(0, 0, 0, 0.2);
+  --tt-border-weak: rgba(0, 0, 0, 0.1);
   --tt-accent-bg: #26c2a3;
   --tt-accent-bg-pressed: #1ea88d;
   --tt-accent-fg: #ffffff;
-  --tt-accent-soft: light-dark(
-    rgba(38, 194, 163, 0.12),
-    rgba(38, 194, 163, 0.2)
-  );
+  --tt-accent-soft: rgba(38, 194, 163, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tt-bg: #111317;
+    --tt-fg: #f2f4f5;
+    --tt-panel: #111317;
+    --tt-panel-strong: #111317;
+    --tt-border: rgba(255, 255, 255, 0.2);
+    --tt-border-weak: rgba(255, 255, 255, 0.1);
+    --tt-accent-soft: rgba(38, 194, 163, 0.2);
+  }
 }
 
 html,
@@ -45,8 +54,7 @@ body {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid
-    light-dark(rgba(38, 194, 163, 0.2), rgba(38, 194, 163, 0.24));
+  border: 3px solid rgba(38, 194, 163, 0.24);
   border-top-color: var(--tt-accent-bg);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -574,6 +582,7 @@ body {
 .picker-bg {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background: rgba(0, 0, 0, 0.6);
 }
 
@@ -582,25 +591,34 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
+  z-index: 1;
+  min-height: 168px;
+  background: #111317;
   background: var(--tt-panel);
   border-top: 2px solid var(--tt-border);
   border-radius: 14px 14px 0 0;
-  padding: 14px 12px;
+  padding: 8px 12px;
   padding-bottom: max(14px, env(safe-area-inset-bottom));
   transform: translateY(100%);
-  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: none;
 }
 
 .picker-overlay.open .picker-sheet {
   transform: translateY(0);
+  animation: picker-sheet-in 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes picker-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .picker-handle {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.15);
-  margin: 0 auto 10px;
+  display: none;
 }
 
 .picker-title {
@@ -683,6 +701,7 @@ body {
 
 .pk-label {
   font-size: 10px;
+  color: var(--tt-fg);
   color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
   text-align: center;
   line-height: 1.2;
@@ -716,13 +735,13 @@ body {
 
 .pk-hint-popup {
   position: fixed;
-  background: color-mix(in srgb, var(--tt-panel) 96%, transparent);
+  background: var(--tt-panel);
   border: 1px solid var(--tt-border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 11px;
   line-height: 1.4;
-  color: color-mix(in srgb, var(--tt-fg) 88%, transparent);
+  color: var(--tt-fg);
   z-index: 300;
   max-width: 240px;
   pointer-events: none;
