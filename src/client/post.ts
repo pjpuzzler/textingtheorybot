@@ -931,7 +931,10 @@ function createPickerItem(
     event.preventDefault();
     event.stopPropagation();
     if (disabled) return;
-    if (Date.now() - lastPickerItemVoteAt < PICKER_ITEM_CLICK_FALLBACK_GUARD_MS) {
+    if (
+      Date.now() - lastPickerItemVoteAt <
+      PICKER_ITEM_CLICK_FALLBACK_GUARD_MS
+    ) {
       return;
     }
     markUserInteraction();

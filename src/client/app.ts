@@ -2276,7 +2276,8 @@ function openClassPicker(p: BadgePlacement, isNew: boolean) {
   pickerTitle.textContent = "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   suppressEditorPickerUntil = Date.now() + 900;
-  suppressEditorPickerBackdropUntil = Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
+  suppressEditorPickerBackdropUntil =
+    Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
   grid.className = "pk-grid";
