@@ -94,8 +94,12 @@ const quickCreateBtn = $("quick-create") as HTMLButtonElement;
 const modEditBtn = $("mod-edit") as HTMLButtonElement;
 const badgeVisToggleBtn = $("badge-vis-toggle") as HTMLButtonElement;
 const eloEl = $("elo") as HTMLDivElement;
-const eloLoginEl = document.getElementById("elo-login") as HTMLDivElement | null;
-const eloLoginTextEl = document.getElementById("elo-login-text") as HTMLDivElement | null;
+const eloLoginEl = document.getElementById(
+  "elo-login",
+) as HTMLDivElement | null;
+const eloLoginTextEl = document.getElementById(
+  "elo-login-text",
+) as HTMLDivElement | null;
 const eloSlider = $("elo-slider") as HTMLInputElement;
 const eloVal = $("elo-val") as HTMLSpanElement;
 const eloBtn = $("elo-btn") as HTMLButtonElement;
@@ -235,12 +239,18 @@ function findCurrentImagePlacementById(
   badgeId: string | undefined,
 ): BadgePlacement | null {
   if (!badgeId) return null;
-  return currentImage()?.placements.find((placement) => placement.id === badgeId) ?? null;
+  return (
+    currentImage()?.placements.find((placement) => placement.id === badgeId) ??
+    null
+  );
 }
 
 function applyImageIndexImmediately(nextIndex: number): void {
   if (!postData) return;
-  const clampedIndex = Math.max(0, Math.min(postData.images.length - 1, nextIndex));
+  const clampedIndex = Math.max(
+    0,
+    Math.min(postData.images.length - 1, nextIndex),
+  );
   activeImageIndex = clampedIndex;
   navTransitionInFlight = false;
   queuedNavIndex = null;
@@ -295,7 +305,8 @@ function commitSwipeNavigation(nextIndex: number): void {
   committedPreviewImg = previewImg;
   committedPreviewBadges = previewBadges;
   if (previewImg) {
-    canvasImg.src = previewImg.currentSrc || previewImg.src || nextImage.imageUrl;
+    canvasImg.src =
+      previewImg.currentSrc || previewImg.src || nextImage.imageUrl;
   } else {
     canvasImg.src = nextImage.imageUrl;
   }
@@ -356,7 +367,11 @@ function ensureSwipePreview(targetIndex: number, dx: number): boolean {
     return false;
   }
 
-  if (swipePreviewIndex !== targetIndex || !swipePreviewImg || !swipePreviewBadges) {
+  if (
+    swipePreviewIndex !== targetIndex ||
+    !swipePreviewImg ||
+    !swipePreviewBadges
+  ) {
     clearSwipePreview();
     const previewImage = postData.images[targetIndex];
     if (!previewImage) return false;
@@ -369,7 +384,8 @@ function ensureSwipePreview(targetIndex: number, dx: number): boolean {
     swipePreviewImg = document.createElement("img");
     swipePreviewImg.className = "canvas-img canvas-preview";
     const cached = imagePreloadCache.get(previewImage.imageUrl);
-    swipePreviewImg.src = cached?.currentSrc || cached?.src || previewImage.imageUrl;
+    swipePreviewImg.src =
+      cached?.currentSrc || cached?.src || previewImage.imageUrl;
     swipePreviewImg.style.position = "absolute";
     swipePreviewImg.style.inset = "0";
     swipePreviewImg.style.zIndex = "2";
@@ -632,8 +648,12 @@ function getCanvasRectForImage(image: PostData["images"][number]) {
   return getCanvasRectForDimensions(
     canvasRect.width,
     canvasRect.height,
-    image.imageWidth || imagePreloadCache.get(image.imageUrl)?.naturalWidth || 0,
-    image.imageHeight || imagePreloadCache.get(image.imageUrl)?.naturalHeight || 0,
+    image.imageWidth ||
+      imagePreloadCache.get(image.imageUrl)?.naturalWidth ||
+      0,
+    image.imageHeight ||
+      imagePreloadCache.get(image.imageUrl)?.naturalHeight ||
+      0,
   );
 }
 
@@ -1114,13 +1134,13 @@ function updateImageNav() {
   imgPrev.style.display = hideArrowsInAndroidFullscreen
     ? "none"
     : hasMultiple
-      ? "inline-flex"
-      : "none";
+    ? "inline-flex"
+    : "none";
   imgNext.style.display = hideArrowsInAndroidFullscreen
     ? "none"
     : hasMultiple
-      ? "inline-flex"
-      : "none";
+    ? "inline-flex"
+    : "none";
   if (
     !hideArrowsInAndroidFullscreen &&
     hasMultiple &&
@@ -1678,9 +1698,10 @@ function updateSwipe(clientX: number, clientY: number): boolean {
         ? 3
         : 4
       : androidLike
-        ? 5
-        : 6;
-    if (Math.abs(dx) < lockDistance && Math.abs(dy) < lockDistance) return false;
+      ? 5
+      : 6;
+    if (Math.abs(dx) < lockDistance && Math.abs(dy) < lockDistance)
+      return false;
     if (Math.abs(dx) <= Math.abs(dy) * (androidLike ? 1.08 : 0.95)) {
       swipeTracking = false;
       swipeStartedNearEdge = false;
@@ -1816,7 +1837,8 @@ canvasEl.addEventListener(
     const edgeGuardPx = isAndroidLike() ? 96 : 64;
     const startedOnBadge = !!badgePlacement;
     const nearEdge =
-      touch.clientX <= edgeGuardPx || touch.clientX >= window.innerWidth - edgeGuardPx;
+      touch.clientX <= edgeGuardPx ||
+      touch.clientX >= window.innerWidth - edgeGuardPx;
     const badgeTapNeedsManualOpen = startedOnBadge && nearEdge;
     beginSwipe(
       touch.clientX,
@@ -1879,7 +1901,8 @@ canvasEl.addEventListener(
 
 canvasEl.addEventListener("pointerdown", (event) => {
   if (swipeInputMode && swipeInputMode !== "pointer") return;
-  if (!isTouchPrimaryInput() || !postData || postData.images.length <= 1) return;
+  if (!isTouchPrimaryInput() || !postData || postData.images.length <= 1)
+    return;
   if (pickerOvl.classList.contains("open")) return;
   if (event.button !== 0) return;
   const target = event.target as HTMLElement;
@@ -1900,7 +1923,8 @@ canvasEl.addEventListener("pointerdown", (event) => {
   const edgeGuardPx = isAndroidLike() ? 96 : 64;
   const startedOnBadge = !!badgePlacement;
   const nearEdge =
-    event.clientX <= edgeGuardPx || event.clientX >= window.innerWidth - edgeGuardPx;
+    event.clientX <= edgeGuardPx ||
+    event.clientX >= window.innerWidth - edgeGuardPx;
   const badgeTapNeedsManualOpen = startedOnBadge && nearEdge;
   beginSwipe(
     event.clientX,
@@ -1922,14 +1946,16 @@ canvasEl.addEventListener("pointerdown", (event) => {
 });
 
 canvasEl.addEventListener("pointermove", (event) => {
-  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId) return;
+  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId)
+    return;
   if (!updateSwipe(event.clientX, event.clientY)) return;
   event.preventDefault();
   event.stopPropagation();
 });
 
 canvasEl.addEventListener("pointerup", (event) => {
-  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId) return;
+  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId)
+    return;
   endSwipe(event.clientX, event.clientY);
   try {
     canvasEl.releasePointerCapture(event.pointerId);
@@ -1937,7 +1963,8 @@ canvasEl.addEventListener("pointerup", (event) => {
 });
 
 canvasEl.addEventListener("pointercancel", (event) => {
-  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId) return;
+  if (swipeInputMode !== "pointer" || swipePointerId !== event.pointerId)
+    return;
   cancelSwipeGesture();
   try {
     canvasEl.releasePointerCapture(event.pointerId);
