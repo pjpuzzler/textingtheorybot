@@ -38,10 +38,10 @@ type EditorImage = {
 };
 
 const MAX_IMAGE_DIM = 2048;
-const VOTE_MIN_RADIUS = 3;
-const VOTE_MAX_RADIUS = 7;
-const ANNOTATED_MIN_RADIUS = 3;
-const ANNOTATED_MAX_RADIUS = 7;
+const VOTE_MIN_RADIUS = 2.7;
+const VOTE_MAX_RADIUS = 5.8;
+const ANNOTATED_MIN_RADIUS = 2.7;
+const ANNOTATED_MAX_RADIUS = 5.8;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 150;
@@ -78,6 +78,7 @@ let pointerState: {
 let images: EditorImage[] = [];
 let activeImageIndex = 0;
 let isSubmitting = false;
+let sliderVisualFrame = 0;
 let markerModeEnabled = false;
 let drawingPointerId: number | null = null;
 let activeStroke: RedactionStroke | null = null;
@@ -1953,10 +1954,21 @@ cmSize.addEventListener("input", () => {
   lastUsedRadius = globalRadius;
   imageRadiusByIndex[activeImageIndex] = globalRadius;
   imageRadiusTouchedByIndex[activeImageIndex] = true;
-  syncActivePlacementRadiiFromSlider(false);
+  syncActivePlacementRadiiFromSlider(true);
+  if (sliderVisualFrame) {
+    return;
+  }
+  sliderVisualFrame = requestAnimationFrame(() => {
+    sliderVisualFrame = 0;
+    render();
+  });
 });
 
 function commitSliderVisualUpdate(): void {
+  if (sliderVisualFrame) {
+    cancelAnimationFrame(sliderVisualFrame);
+    sliderVisualFrame = 0;
+  }
   syncActivePlacementRadiiFromSlider(true);
   render();
 }

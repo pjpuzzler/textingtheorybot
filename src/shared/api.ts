@@ -123,7 +123,7 @@ export const ELO_COLOR_STOPS = [
   { elo: 1300, hex: "#95b776" },
   { elo: 1600, hex: "#81b64c" },
   { elo: 1900, hex: "#749bbf" },
-  { elo: 2200, hex: "#26c2a3" },
+  { elo: 2199, hex: "#26c2a3" },
   { elo: 2200, hex: "#722f2c" },
 ] as const;
 
@@ -172,6 +172,7 @@ export type InitResponse = {
   postId: string;
   username: string;
   userId: string;
+  isOwnPost: boolean;
   isModerator: boolean;
   postData: PostData | null;
   consensus: Record<string, BadgeConsensus>;

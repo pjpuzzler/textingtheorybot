@@ -41,6 +41,7 @@ body {
   overflow: hidden;
   background: var(--tt-bg);
   color: var(--tt-fg);
+  overscroll-behavior-x: none;
 }
 
 .loading {
@@ -81,6 +82,28 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--tt-bg);
+  touch-action: pan-y;
+  overscroll-behavior-x: contain;
+  -webkit-touch-callout: none;
+}
+
+.badges,
+.badge,
+.image-nav,
+.img-dots,
+.img-dot,
+.page-chip {
+  -webkit-touch-callout: none;
+}
+
+.badges,
+.badge,
+.image-nav,
+.img-dots,
+.img-dot,
+.page-chip {
+  touch-action: pan-y;
+  overscroll-behavior-x: contain;
 }
 
 .canvas-img {
@@ -92,6 +115,8 @@ body {
   transform: translateX(0);
   opacity: 1;
   transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 .canvas-img.slide-from-right {
@@ -115,6 +140,8 @@ body {
   transform: translateX(0);
   opacity: 1;
   transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 .badges.slide-from-right {
@@ -367,21 +394,21 @@ body {
   border: none;
   background: conic-gradient(
     from 0deg,
-    #fa412d 0deg 25deg,
+    #26c2a3 0deg 25deg,
     transparent 25deg 45deg,
-    #ff7769 45deg 70deg,
+    #749bbf 45deg 70deg,
     transparent 70deg 90deg,
-    #ffa459 90deg 115deg,
+    #81b64c 90deg 115deg,
     transparent 115deg 135deg,
-    #f7c631 135deg 160deg,
+    #95b776 135deg 160deg,
     transparent 160deg 180deg,
-    #95b776 180deg 205deg,
+    #f7c631 180deg 205deg,
     transparent 205deg 225deg,
-    #81b64c 225deg 250deg,
+    #ffa459 225deg 250deg,
     transparent 250deg 270deg,
-    #749bbf 270deg 295deg,
+    #ff7769 270deg 295deg,
     transparent 295deg 315deg,
-    #9ca3af 315deg 340deg,
+    #fa412d 315deg 340deg,
     transparent 340deg 360deg
   );
   -webkit-mask: radial-gradient(
@@ -394,10 +421,51 @@ body {
     transparent calc(100% - var(--ring-width, 2px)),
     #000 calc(100% - var(--ring-width, 2px))
   );
-  animation: ring-spin 24s linear infinite;
+  animation: ring-spin 34s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
+}
+
+.badges--ghost .badge--ring::before {
+  animation: none !important;
+}
+
+.badge--ring-ghost::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--ring-width, 2px) * -1);
+  border-radius: 50%;
+  border: none;
+  background: conic-gradient(
+    from 0deg,
+    #26c2a3 0deg 25deg,
+    transparent 25deg 45deg,
+    #749bbf 45deg 70deg,
+    transparent 70deg 90deg,
+    #81b64c 90deg 115deg,
+    transparent 115deg 135deg,
+    #95b776 135deg 160deg,
+    transparent 160deg 180deg,
+    #f7c631 180deg 205deg,
+    transparent 205deg 225deg,
+    #ffa459 225deg 250deg,
+    transparent 250deg 270deg,
+    #ff7769 270deg 295deg,
+    transparent 295deg 315deg,
+    #fa412d 315deg 340deg,
+    transparent 340deg 360deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--ring-width, 2px)),
+    #000 calc(100% - var(--ring-width, 2px))
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--ring-width, 2px)),
+    #000 calc(100% - var(--ring-width, 2px))
+  );
 }
 
 @keyframes ring-spin {
@@ -436,6 +504,29 @@ body {
   gap: 4px;
 }
 
+.elo-row,
+.elo-login {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+}
+
+.elo-login-text {
+  flex: 1 1 auto;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--tt-fg);
+  text-align: center;
+}
+
 .elo-slider-wrap {
   position: relative;
   flex: 1;
@@ -448,7 +539,7 @@ body {
   height: 9px;
   border-radius: 4px;
   outline: none;
-  touch-action: manipulation;
+  touch-action: none;
 }
 
 .elo-slider::-webkit-slider-runnable-track {

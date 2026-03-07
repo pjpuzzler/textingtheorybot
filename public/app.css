@@ -199,6 +199,8 @@ html.tt-edit-boot #overlay-submit {
   transform: translateX(0);
   opacity: 1;
   transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.26s ease;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 .cm-img.slide-from-right {
@@ -227,6 +229,8 @@ html.tt-edit-boot #overlay-submit {
   position: absolute;
   inset: 0;
   z-index: 2;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 .cm-marker-toggle {

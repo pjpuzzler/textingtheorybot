@@ -585,6 +585,7 @@ async function onInit(): Promise<InitResponse> {
     postId,
     username,
     userId,
+    isOwnPost: !!postData && !!userId && postData.creatorId === userId,
     isModerator,
     postData,
     consensus,
