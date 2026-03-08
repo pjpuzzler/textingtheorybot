@@ -1137,7 +1137,7 @@ function openEditor() {
   } else {
     hintEl.style.display = "";
     hintEl.innerHTML =
-      'Tap to place a badge by <b>all</b> messages.<br />Place off the center edge if possible.<br />Use the slider to adjust badge sizing.';
+      "Tap to place a badge by <b>all</b> messages.<br />Place off the center edge if possible.<br />Use the slider to adjust badge sizing.";
   }
   syncSliderForActiveImage();
   updateSideUI();
