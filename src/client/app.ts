@@ -46,7 +46,8 @@ const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 150;
 const MIN_CROP_SIZE_PCT = 8;
-const EDITOR_PICKER_BACKDROP_GUARD_MS = 900;
+const EDITOR_PICKER_BACKDROP_GUARD_MS = 180;
+const CROP_BACKDROP_GUARD_MS = 1000;
 
 let mode: PostMode = "vote";
 let selectedId: string | null = null;
@@ -184,6 +185,10 @@ const cropApply = $("crop-apply") as HTMLButtonElement;
 
 let pendingNewAnnotation: BadgePlacement | null = null;
 let suppressEditorPickerUntil = 0;
+let suppressEditorSyntheticClickUntil = 0;
+let swallowEditorSyntheticClick = false;
+let suppressCropBackdropUntil = 0;
+let suppressCreateCropCancelUntil = 0;
 
 function resetTransientOverlays(): void {
   pickerModal.classList.remove("open");
@@ -221,14 +226,30 @@ if (isEditBootRequested) {
   screenMode.style.display = "none";
   createModal.classList.add("open");
   submitOvl.style.display = "flex";
+  submitOvl.style.pointerEvents = "auto";
   submitText.textContent = "Loading editor…";
 } else {
   document.documentElement.classList.remove("tt-edit-boot");
   submitOvl.style.display = "none";
+  submitOvl.style.pointerEvents = "none";
 }
 
 function sanitizeOtherEloLabel(value: string): string {
   return value.replace(/[^A-Za-z]/g, "").slice(0, 16);
+}
+
+function restoreEditorInteractivity(): void {
+  createModal.style.pointerEvents = "auto";
+  cmCanvasWrap.style.pointerEvents = "auto";
+  cmBadges.style.pointerEvents = "auto";
+  cmMarkerToggle.style.pointerEvents = "auto";
+  cmSize.style.pointerEvents = "auto";
+  cmCrop.style.pointerEvents = "auto";
+  cmOrderUp.style.pointerEvents = "auto";
+  cmOrderDown.style.pointerEvents = "auto";
+  cmNext.style.pointerEvents = "auto";
+  cmImageNav.style.pointerEvents = "";
+  submitOvl.style.pointerEvents = "none";
 }
 
 async function loadRemoteImageAsEditorImage(
@@ -558,6 +579,7 @@ function resetCropSelection(): void {
 }
 
 function updateCropFlowUI(): void {
+  cropBg.style.pointerEvents = createCropFlowActive ? "none" : "auto";
   if (createCropFlowActive) {
     cropStep.textContent = `Image ${createCropFlowIndex + 1}/${images.length}`;
     cropApply.textContent =
@@ -585,6 +607,10 @@ function openCropModalForActiveImage(): void {
 
 function closeCropModal(): void {
   cropModal.classList.remove("open");
+  cropBg.style.pointerEvents = "auto";
+  if (!createCropFlowActive) {
+    createModal.style.pointerEvents = "";
+  }
   activeCropHandle = null;
   cropDrawingPointerId = null;
   cropActiveStroke = null;
@@ -910,21 +936,30 @@ function syncActivePlacementRadiiFromSlider(applyToPlacements = true): void {
 
 function startCreateCropFlow(): void {
   if (!images.length) return;
+  suppressCreateCropCancelUntil = 0;
   createCropFlowActive = true;
   createCropFlowIndex = 0;
   activeImageIndex = 0;
+  openEditor();
+  createModal.style.pointerEvents = "none";
   openCropModalForActiveImage();
 }
 
 function cancelCreateCropFlow(): void {
+  if (Date.now() < suppressCreateCropCancelUntil) {
+    return;
+  }
   createCropFlowActive = false;
   createCropFlowIndex = 0;
   images = [];
   activeImageIndex = 0;
+  createModal.style.pointerEvents = "";
   closeCropModal();
   createModal.classList.remove("open");
   detailsModal.classList.remove("open");
   screenMode.style.display = "flex";
+  swallowEditorSyntheticClick = true;
+  suppressEditorSyntheticClickUntil = Date.now() + 650;
 }
 
 function advanceCreateCropFlow(): void {
@@ -944,6 +979,7 @@ function advanceCreateCropFlow(): void {
   navTransitionInFlight = false;
   queuedNavIndex = null;
   cmImg.src = "";
+  createModal.style.pointerEvents = "";
   closeCropModal();
   openEditor();
 }
@@ -1008,6 +1044,12 @@ function getActiveRedactions(): RedactionStroke[] {
 
 function getTotalPlacements(): number {
   return images.reduce((sum, image) => sum + image.placements.length, 0);
+}
+
+function updateOrderControlsVisibility(): void {
+  const showOrderControls = mode === "vote";
+  cmOrderUp.style.display = showOrderControls ? "inline-flex" : "none";
+  cmOrderDown.style.display = showOrderControls ? "inline-flex" : "none";
 }
 
 function updateSideUI() {
@@ -1075,6 +1117,7 @@ cmTitle.addEventListener("input", () => {
 
 function openEditor() {
   applySliderBoundsForMode();
+  updateOrderControlsVisibility();
   globalRadius = Number(cmSize.value) || globalRadius;
   lastUsedRadius = clampGlobalRadius(globalRadius);
   resetPerImageRadiusState();
@@ -1084,6 +1127,7 @@ function openEditor() {
   screenMode.style.display = "none";
   createModal.classList.add("open");
   submitOvl.style.display = "none";
+  restoreEditorInteractivity();
   //   hintEl.textContent =
   //     mode === "annotated"
   //       ? "Tap to place a badge by every relevant message. Don't cover anything important."
@@ -1092,6 +1136,8 @@ function openEditor() {
     hintEl.style.display = "none";
   } else {
     hintEl.style.display = "";
+    hintEl.innerHTML =
+      'Tap to place a badge by <b>all</b> messages.<br />Place off the center edge if possible.<br />Use the slider to adjust badge sizing.';
   }
   syncSliderForActiveImage();
   updateSideUI();
@@ -1099,6 +1145,8 @@ function openEditor() {
   scheduleEditorLayoutRefresh();
   window.requestAnimationFrame(() => scheduleEditorLayoutRefresh());
   window.setTimeout(() => scheduleEditorLayoutRefresh(), 120);
+  window.setTimeout(() => restoreEditorInteractivity(), 0);
+  window.requestAnimationFrame(() => restoreEditorInteractivity());
 }
 
 function updateMarkerToggleUI(): void {
@@ -1911,6 +1959,7 @@ cropReset.addEventListener("click", (event) => {
 
 cropCancel.addEventListener("click", (event) => {
   event.preventDefault();
+  event.stopPropagation();
   if (createCropFlowActive) {
     cancelCreateCropFlow();
     return;
@@ -1918,9 +1967,25 @@ cropCancel.addEventListener("click", (event) => {
   closeCropModal();
 });
 
-cropBg.addEventListener("click", () => {
+cropBg.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
   if (createCropFlowActive) {
-    cancelCreateCropFlow();
+    return;
+  }
+  if (Date.now() < suppressCropBackdropUntil) {
+    return;
+  }
+  closeCropModal();
+});
+
+cropBg.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (createCropFlowActive) {
+    return;
+  }
+  if (Date.now() < suppressCropBackdropUntil) {
     return;
   }
   closeCropModal();
@@ -1928,13 +1993,18 @@ cropBg.addEventListener("click", () => {
 
 cropApply.addEventListener("click", async (event) => {
   event.preventDefault();
+  event.stopPropagation();
   if (cropApplying || !images.length) return;
+  suppressCreateCropCancelUntil = Date.now() + 1500;
+  suppressCropBackdropUntil = Date.now() + CROP_BACKDROP_GUARD_MS;
   cropApplying = true;
   try {
     submitOvl.style.display = "flex";
+    submitOvl.style.pointerEvents = "auto";
     submitText.textContent = "Cropping image…";
     await applyCropToActiveImage();
     submitOvl.style.display = "none";
+    submitOvl.style.pointerEvents = "none";
     if (createCropFlowActive) {
       advanceCreateCropFlow();
     } else {
@@ -1945,6 +2015,7 @@ cropApply.addEventListener("click", async (event) => {
     alert("Failed to crop image.");
   } finally {
     submitOvl.style.display = "none";
+    submitOvl.style.pointerEvents = "none";
     cropApplying = false;
   }
 });
@@ -2287,7 +2358,7 @@ function isBookValid(p: BadgePlacement): boolean {
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
   pickerTitle.textContent = "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
-  suppressEditorPickerUntil = Date.now() + 900;
+  suppressEditorPickerUntil = Date.now() + 120;
   suppressEditorPickerBackdropUntil =
     Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
@@ -2368,7 +2439,7 @@ function createPickerItem(
       pendingNewAnnotation = null;
       hintEl.classList.add("hidden");
     }
-    closePicker();
+    closePicker(false);
     render();
   });
 
@@ -2424,11 +2495,37 @@ function closeHint() {
   }
 }
 
-function closePicker() {
+function closePicker(swallowSyntheticClick = true) {
   pickerModal.classList.remove("open");
   pendingNewAnnotation = null;
+  if (swallowSyntheticClick) {
+    swallowEditorSyntheticClick = true;
+    suppressEditorSyntheticClickUntil = Date.now() + 650;
+  }
   closeHint();
 }
+
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!swallowEditorSyntheticClick) return;
+    if (Date.now() >= suppressEditorSyntheticClickUntil) {
+      swallowEditorSyntheticClick = false;
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".picker-sheet") || target?.closest(".crop-card")) {
+      return;
+    }
+    swallowEditorSyntheticClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
+  },
+  true,
+);
 
 pickerBg.addEventListener("pointerdown", (event) => {
   if (Date.now() < suppressEditorPickerBackdropUntil) {
@@ -2459,6 +2556,8 @@ document.addEventListener("pointerdown", (event) => {
   if (target.closest(".picker-sheet") || target.closest(".ed-badge")) {
     return;
   }
+  event.preventDefault();
+  event.stopPropagation();
   closePicker();
 });
 window.addEventListener("resize", () => {
