@@ -1804,8 +1804,7 @@ function setEloFromClientX(clientX: number): void {
   const min = Number(eloSlider.min) || MIN_ELO;
   const max = Number(eloSlider.max) || MAX_ELO;
   const step = Number(eloSlider.step) || 50;
-  const thumbInset =
-    rect.width > ELO_THUMB_SIZE_PX ? ELO_THUMB_SIZE_PX / 2 : 0;
+  const thumbInset = rect.width > ELO_THUMB_SIZE_PX ? ELO_THUMB_SIZE_PX / 2 : 0;
   const trackLeft = rect.left + thumbInset;
   const trackRight = rect.right - thumbInset;
   const clampedX = Math.max(trackLeft, Math.min(trackRight, clientX));
