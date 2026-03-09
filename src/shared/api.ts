@@ -259,7 +259,6 @@ export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];
 // --- Consensus helpers ---
 
 export const BOOK_MISS_IQM_MAJORITY = 0.5;
-export const INTERESTING_STD_DEV_THRESHOLD = 1.5;
 
 /**
  * Interquartile Mean — trims 25% from each end, averages the middle 50%.
@@ -293,8 +292,8 @@ export function iqmToClassification(
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
 ): Classification {
-  const stdDev = interquartileWeightedStdDev(voteCounts, totalVotes);
-  if (stdDev >= INTERESTING_STD_DEV_THRESHOLD) {
+  const { q1, q3 } = interquartileWeightedBounds(voteCounts, totalVotes);
+  if (q1 < 0 && q3 > 0) {
     return Classification.INTERESTING;
   }
 
@@ -413,11 +412,11 @@ function interquartileVoteMassByClassification(
   return { byClassification, total };
 }
 
-function interquartileWeightedStdDev(
+function interquartileWeightedBounds(
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
-): number {
-  if (totalVotes <= 1) return 0;
+): { q1: number; q3: number } {
+  if (totalVotes <= 1) return { q1: 0, q3: 0 };
 
   const values: number[] = [];
   for (const [classification, count] of Object.entries(voteCounts)) {
@@ -427,36 +426,23 @@ function interquartileWeightedStdDev(
     for (let i = 0; i < votes; i++) values.push(weight);
   }
 
-  if (values.length <= 1) return 0;
-  const n = values.length;
+  if (values.length <= 1) return { q1: 0, q3: 0 };
   const sorted = values.sort((a, b) => a - b);
-  const trimProportion = 0.25;
-  const trimAmount = n * trimProportion;
-  const k = Math.floor(trimAmount);
-  const g = trimAmount - k;
-  const boundaryWeight = 1 - g;
-  const totalWeight = n - 2 * trimAmount;
-  if (totalWeight <= 0) return 0;
+  const q1 = quantile(sorted, 0.25);
+  const q3 = quantile(sorted, 0.75);
+  return { q1, q3 };
+}
 
-  let weightedSum = 0;
-  for (let index = k + 1; index <= n - (k + 1) - 1; index++) {
-    weightedSum += sorted[index]!;
-  }
-  weightedSum += sorted[k]! * boundaryWeight;
-  weightedSum += sorted[n - 1 - k]! * boundaryWeight;
-  const mean = weightedSum / totalWeight;
-
-  let weightedVarianceSum = 0;
-  for (let index = k + 1; index <= n - (k + 1) - 1; index++) {
-    const diff = sorted[index]! - mean;
-    weightedVarianceSum += diff * diff;
-  }
-  const lowDiff = sorted[k]! - mean;
-  const highDiff = sorted[n - 1 - k]! - mean;
-  weightedVarianceSum += boundaryWeight * lowDiff * lowDiff;
-  weightedVarianceSum += boundaryWeight * highDiff * highDiff;
-
-  return Math.sqrt(weightedVarianceSum / totalWeight);
+function quantile(sortedValues: number[], q: number): number {
+  if (sortedValues.length === 0) return 0;
+  if (sortedValues.length === 1) return sortedValues[0]!;
+  const clampedQ = Math.max(0, Math.min(1, q));
+  const index = (sortedValues.length - 1) * clampedQ;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower]!;
+  const t = index - lower;
+  return sortedValues[lower]! * (1 - t) + sortedValues[upper]! * t;
 }
 
 /** Interpolate ELO color from color stops */

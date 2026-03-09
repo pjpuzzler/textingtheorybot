@@ -750,7 +750,7 @@ function clampPlacementToImageBounds(
   const scaleBase = Math.max(width, height);
   const sizePx = ((radius * 2) / 100) * scaleBase;
   const half = sizePx / 2;
-  const minInsideHalf = half - sizePx / 3;
+  const minInsideHalf = half - sizePx / 6;
   const minX = minInsideHalf;
   const maxX = width - minInsideHalf;
   const minY = minInsideHalf;
@@ -1584,7 +1584,7 @@ function clampPlacementCenter(
   rect: ReturnType<typeof canvasRect>,
 ): { x: number; y: number } {
   const half = sizePx / 2;
-  const minInsideHalf = half - sizePx / 3;
+  const minInsideHalf = half - sizePx / 6;
   const minX = rect.imgX + minInsideHalf;
   const maxX = rect.imgX + rect.imgW - minInsideHalf;
   const minY = rect.imgY + minInsideHalf;

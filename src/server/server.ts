@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { context, reddit, redis, media } from "@devvit/web/server";
 import type { UiResponse } from "@devvit/web/shared";
+import { EntrypointHeight } from "@devvit/protos/json/reddit/devvit/post/v1/post.js";
 import {
   ApiEndpoint,
   Classification,
@@ -42,6 +43,11 @@ const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
+const DEFAULT_CUSTOM_POST_STYLES = {
+  backgroundColor: "#FFFFFFFF",
+  backgroundColorDark: "#111317FF",
+  height: EntrypointHeight.TALL,
+} as const;
 
 // ============================
 // Redis key helpers
@@ -167,6 +173,7 @@ async function onRequest(
         title: "New Texting Theory Post",
         subredditName: context.subredditName ?? "TextingTheory",
         runAs: "USER",
+        styles: DEFAULT_CUSTOM_POST_STYLES,
         userGeneratedContent: {
           text: "New Texting Theory Post",
         },
@@ -210,6 +217,7 @@ async function onAppInstall(): Promise<{
   const installKey = `tt:install-post:${subredditName}`;
   const existing = await redis.get(installKey);
   if (existing) {
+    await applyCustomPostStylesFromUrl(existing);
     return { type: "app-install", created: false, postUrl: existing };
   }
 
@@ -217,6 +225,7 @@ async function onAppInstall(): Promise<{
     subredditName,
     title: "Create Texting Theory Post",
     postData: { v: 1 },
+    styles: DEFAULT_CUSTOM_POST_STYLES,
     // app is the author of the create factory post pinned to the top of the subreddit
     // every actual post is created via runAs: USER in accordance with Devvit guidelines
     runAs: "APP",
@@ -233,6 +242,32 @@ function getPostId(): string {
   const pid = context.postId;
   if (!pid) throw new Error("No postId in context");
   return pid;
+}
+
+function toPostFullname(postId: string): `t3_${string}` {
+  return (postId.startsWith("t3_") ? postId : `t3_${postId}`) as `t3_${string}`;
+}
+
+function postIdFromUrl(postUrl: string): string | null {
+  const match = postUrl.match(/\/comments\/([a-z0-9]+)\//i);
+  return match?.[1] ?? null;
+}
+
+async function applyCustomPostStyles(postId: string): Promise<void> {
+  try {
+    await reddit.setPostStyles(
+      toPostFullname(postId),
+      DEFAULT_CUSTOM_POST_STYLES,
+    );
+  } catch {
+    // best-effort styling only
+  }
+}
+
+async function applyCustomPostStylesFromUrl(postUrl: string): Promise<void> {
+  const postId = postIdFromUrl(postUrl);
+  if (!postId) return;
+  await applyCustomPostStyles(postId);
 }
 
 function getUserId(): string {
@@ -678,6 +713,9 @@ async function onUpdatePost(req: IncomingMessage): Promise<UpdatePostResponse> {
   };
   await redis.set(postKey(postId), JSON.stringify(updatedPost));
   await clearConsensusCache(postId);
+  if (existingPost.mode === "vote") {
+    await applyCustomPostStyles(postId);
+  }
 
   const subredditName = context.subredditName ?? "TextingTheory";
   const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
@@ -779,6 +817,7 @@ async function onCreatePost(
       title,
       postData: { v: 1 },
       runAs: "USER",
+      styles: DEFAULT_CUSTOM_POST_STYLES,
       userGeneratedContent: {
         text: title,
         imageUrls: uploads.map((upload) => upload.imageUrl),

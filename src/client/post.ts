@@ -1179,8 +1179,10 @@ canvasEl.addEventListener("click", (event) => {
     return;
   }
   const target = event.target as HTMLElement;
+  const badgeClicksOpenExpanded =
+    !!postData && postData.mode === "vote" && !isVotingWindowOpen();
   if (
-    target.closest(".badge") ||
+    (target.closest(".badge") && !badgeClicksOpenExpanded) ||
     target.closest(".img-nav-btn") ||
     target.closest("#quick-create") ||
     target.closest("#mod-edit") ||
@@ -1802,10 +1804,17 @@ function setEloFromClientX(clientX: number): void {
   const min = Number(eloSlider.min) || MIN_ELO;
   const max = Number(eloSlider.max) || MAX_ELO;
   const step = Number(eloSlider.step) || 50;
-  const clampedX = Math.max(rect.left, Math.min(rect.right, clientX));
-  const t = rect.width > 0 ? (clampedX - rect.left) / rect.width : 0;
+  const thumbInset =
+    rect.width > ELO_THUMB_SIZE_PX ? ELO_THUMB_SIZE_PX / 2 : 0;
+  const trackLeft = rect.left + thumbInset;
+  const trackRight = rect.right - thumbInset;
+  const clampedX = Math.max(trackLeft, Math.min(trackRight, clientX));
+  const t =
+    trackRight > trackLeft
+      ? (clampedX - trackLeft) / (trackRight - trackLeft)
+      : 0;
   const raw = min + t * (max - min);
-  const snapped = Math.round(raw / step) * step;
+  const snapped = min + Math.round((raw - min) / step) * step;
   const value = Math.max(min, Math.min(max, snapped));
   eloSlider.value = String(value);
   updateEloDisplay();
