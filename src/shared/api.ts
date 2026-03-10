@@ -259,8 +259,7 @@ export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];
 // --- Consensus helpers ---
 
 export const BOOK_MISS_IQM_MAJORITY = 0.5;
-export const INTERESTING_LOWER_BOUND: Classification =
-  Classification.MISTAKE;
+export const INTERESTING_LOWER_BOUND: Classification = Classification.MISTAKE;
 export const INTERESTING_UPPER_BOUND: Classification = Classification.BEST;
 
 /**
@@ -296,10 +295,8 @@ export function iqmToClassification(
   totalVotes: number,
 ): Classification {
   const { q1, q3 } = interquartileWeightedBounds(voteCounts, totalVotes);
-  const interestingLowerWeight =
-    CLASSIFICATION_WEIGHT[INTERESTING_LOWER_BOUND];
-  const interestingUpperWeight =
-    CLASSIFICATION_WEIGHT[INTERESTING_UPPER_BOUND];
+  const interestingLowerWeight = CLASSIFICATION_WEIGHT[INTERESTING_LOWER_BOUND];
+  const interestingUpperWeight = CLASSIFICATION_WEIGHT[INTERESTING_UPPER_BOUND];
   if (q1 <= interestingLowerWeight && q3 >= interestingUpperWeight) {
     return Classification.INTERESTING;
   }
