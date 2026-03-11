@@ -389,7 +389,7 @@ body {
 .badge--ring::before {
   content: "";
   position: absolute;
-  inset: calc(var(--ring-width, 2px) * -1);
+  inset: calc(var(--ring-width, 1px) * -1);
   border-radius: 50%;
   border: none;
   background: conic-gradient(
@@ -413,15 +413,15 @@ body {
   );
   -webkit-mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
+    transparent calc(100% - var(--ring-width, 1px)),
+    #000 calc(100% - var(--ring-width, 1px))
   );
   mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
+    transparent calc(100% - var(--ring-width, 1px)),
+    #000 calc(100% - var(--ring-width, 1px))
   );
-  animation: ring-spin 34s linear infinite;
+  animation: ring-spin var(--ring-duration, 48s) linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
@@ -434,7 +434,7 @@ body {
 .badge--ring-ghost::before {
   content: "";
   position: absolute;
-  inset: calc(var(--ring-width, 2px) * -1);
+  inset: calc(var(--ring-width, 1px) * -1);
   border-radius: 50%;
   border: none;
   background: conic-gradient(
@@ -458,13 +458,13 @@ body {
   );
   -webkit-mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
+    transparent calc(100% - var(--ring-width, 1px)),
+    #000 calc(100% - var(--ring-width, 1px))
   );
   mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
+    transparent calc(100% - var(--ring-width, 1px)),
+    #000 calc(100% - var(--ring-width, 1px))
   );
 }
 

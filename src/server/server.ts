@@ -6,6 +6,7 @@ import {
   ApiEndpoint,
   Classification,
   CLASSIFICATION_WEIGHT,
+  PICKER_CLASSIFICATIONS,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
   MIN_VOTES_FOR_POST_FLAIR,
   MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
@@ -43,6 +44,7 @@ const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
+const ELO_VOTE_STEP = 50;
 const DEFAULT_CUSTOM_POST_STYLES = {
   backgroundColor: "#FFFFFFFF",
   backgroundColorDark: "#111317FF",
@@ -66,6 +68,9 @@ const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus-meta:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+const PICKER_CLASSIFICATION_SET = new Set<Classification>(
+  PICKER_CLASSIFICATIONS,
+);
 
 async function clearConsensusCache(postId: string): Promise<void> {
   await redis.del(consensusCacheKey(postId, true));
@@ -459,6 +464,12 @@ async function isEligibleVoter(
   }
 
   return true;
+}
+
+function isValidBadgeVoteClassification(
+  classification: string,
+): classification is Classification {
+  return PICKER_CLASSIFICATION_SET.has(classification as Classification);
 }
 
 function getTitleEmoji(elo: number): string {
@@ -864,6 +875,10 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   const body = await readJSON<VoteBadgeRequest>(req);
   const postData = await getPostData(postId);
 
+  if (!isValidBadgeVoteClassification(body.classification)) {
+    throw { status: 400, message: "Invalid badge classification" };
+  }
+
   if (postData.creatorId === userId) {
     throw { status: 403, message: "You can't vote on your own post" };
   }
@@ -979,7 +994,17 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
     throw { status: 403, message: "Voting has ended for this post" };
   }
 
-  const elo = Math.max(MIN_ELO, Math.min(MAX_ELO, body.elo));
+  const rawElo = Number(body.elo);
+  if (!Number.isFinite(rawElo)) {
+    throw { status: 400, message: "Invalid Elo vote" };
+  }
+  const elo = Math.max(
+    MIN_ELO,
+    Math.min(
+      MAX_ELO,
+      MIN_ELO + Math.round((rawElo - MIN_ELO) / ELO_VOTE_STEP) * ELO_VOTE_STEP,
+    ),
+  );
   const eligible = await isEligibleVoter(postData, userId);
 
   // Always store local user ELO for UX indicator

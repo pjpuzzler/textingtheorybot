@@ -48,7 +48,8 @@ let queuedNavIndex: number | null = null;
 let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
 const ELO_THUMB_SIZE_PX = 24;
-const UNVOTED_RING_WIDTH_PX = 1.5;
+const UNVOTED_RING_WIDTH_PX = 1;
+const UNVOTED_RING_DURATION_S = 48;
 const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
 const PICKER_ITEM_CLICK_FALLBACK_GUARD_MS = 500;
 const PICKER_CLOSE_GUARD_AFTER_OPEN_MS = 180;
@@ -77,6 +78,7 @@ let lastPersistedPageIndex = -1;
 let swipeInputMode: "touch" | "pointer" | null = null;
 let swipePointerId: number | null = null;
 let eloPointerId: number | null = null;
+let eloPointerValue: number | null = null;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -490,10 +492,8 @@ function ringPhaseDelaySeconds(): number {
     typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now()
       : Date.now();
-  return -((nowMs % 15000) / 1000);
+  return -((nowMs % (UNVOTED_RING_DURATION_S * 1000)) / 1000);
 }
-
-const stableRingPhaseDelaySeconds = ringPhaseDelaySeconds();
 
 function applyBadgeVisibility(): void {
   badgesEl.classList.toggle("is-hidden", !badgesVisible);
@@ -1285,7 +1285,11 @@ function renderBadgesInto(
           el.classList.add("badge--tappable");
           el.style.setProperty(
             "--ring-delay",
-            `${stableRingPhaseDelaySeconds}s`,
+            `${ringPhaseDelaySeconds()}s`,
+          );
+          el.style.setProperty(
+            "--ring-duration",
+            `${UNVOTED_RING_DURATION_S}s`,
           );
           el.style.setProperty("--ring-width", `${UNVOTED_RING_WIDTH_PX}px`);
         }
@@ -1799,7 +1803,7 @@ function cancelSwipeGesture(): void {
   animateCanvasDragReset();
 }
 
-function setEloFromClientX(clientX: number): void {
+function setEloFromClientX(clientX: number): number {
   const rect = eloSlider.getBoundingClientRect();
   const min = Number(eloSlider.min) || MIN_ELO;
   const max = Number(eloSlider.max) || MAX_ELO;
@@ -1815,8 +1819,10 @@ function setEloFromClientX(clientX: number): void {
   const raw = min + t * (max - min);
   const snapped = min + Math.round((raw - min) / step) * step;
   const value = Math.max(min, Math.min(max, snapped));
+  eloPointerValue = value;
   eloSlider.value = String(value);
   updateEloDisplay();
+  return value;
 }
 
 canvasEl.addEventListener(
@@ -2052,12 +2058,17 @@ function clearEloPointer(pointerId: number): void {
   try {
     eloSlider.releasePointerCapture(pointerId);
   } catch {}
+  eloPointerValue = null;
 }
 
 eloSlider.addEventListener("pointerup", (event) => {
   if (eloPointerId !== event.pointerId) return;
-  setEloFromClientX(event.clientX);
+  if (eloPointerValue !== null) {
+    eloSlider.value = String(eloPointerValue);
+    updateEloDisplay();
+  }
   clearEloPointer(event.pointerId);
+  event.preventDefault();
 });
 
 eloSlider.addEventListener("pointercancel", (event) => {
