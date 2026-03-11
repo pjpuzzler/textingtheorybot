@@ -1283,10 +1283,7 @@ function renderBadgesInto(
         if (!uv && canVoteOnCurrentPost()) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
-          el.style.setProperty(
-            "--ring-delay",
-            `${ringPhaseDelaySeconds()}s`,
-          );
+          el.style.setProperty("--ring-delay", `${ringPhaseDelaySeconds()}s`);
           el.style.setProperty(
             "--ring-duration",
             `${UNVOTED_RING_DURATION_S}s`,
