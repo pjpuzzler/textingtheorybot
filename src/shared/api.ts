@@ -252,6 +252,10 @@ export const ApiEndpoint = {
   VoteBadge: "/api/vote-badge",
   VoteElo: "/api/vote-elo",
   MenuCreate: "/internal/menu/create",
+  MenuCommentReplyClassification:
+    "/internal/menu/comment-reply-classification",
+  FormCommentReplyClassification:
+    "/internal/forms/comment-reply-classification",
 } as const;
 
 export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];

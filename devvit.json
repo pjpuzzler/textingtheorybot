@@ -5,8 +5,22 @@
     "media": true,
     "reddit": {
       "enable": true,
-      "asUser": ["SUBMIT_POST"]
+      "asUser": ["SUBMIT_POST", "SUBMIT_COMMENT"]
     }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Reply With Classification Image",
+        "forUserType": "user",
+        "location": "comment",
+        "endpoint": "/internal/menu/comment-reply-classification",
+        "postFilter": "none"
+      }
+    ]
+  },
+  "forms": {
+    "commentReplyClassification": "/internal/forms/comment-reply-classification"
   },
   "post": {
     "dir": "public",

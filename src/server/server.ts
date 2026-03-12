@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { context, reddit, redis, media } from "@devvit/web/server";
 import type { UiResponse } from "@devvit/web/shared";
+import type { Form } from "@devvit/shared";
+import { RichTextBuilder } from "@devvit/public-api";
 import { EntrypointHeight } from "@devvit/protos/json/reddit/devvit/post/v1/post.js";
 import {
   ApiEndpoint,
@@ -34,6 +36,8 @@ import {
 
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
 const ELO_REGEX = /(\d+) Elo/;
+const COMMENT_REPLY_FORM_NAME = "commentReplyClassification";
+const COMMENT_REPLY_TARGET_TTL_MS = 10 * 60 * 1000;
 const ANNOTATED_FLAIR_ID = "c2d007e7-ca1c-11eb-bc34-0e56c289897d";
 // const ANNOTATED_FLAIR_ID = "93b0550e-0ac4-11f1-b7b0-eec33c00ce1a";
 const NO_VOTES_FLAIR_TEXT = "No votes";
@@ -68,9 +72,85 @@ const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus-meta:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+const commentReplyTargetKey = (userId: string) =>
+  `tt:comment-reply-target:v1:${userId}`;
 const PICKER_CLASSIFICATION_SET = new Set<Classification>(
   PICKER_CLASSIFICATIONS,
 );
+
+const COMMENT_REPLY_OPTIONS = [
+  {
+    label: "Superbrilliant",
+    value: "Superbrilliant",
+    imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
+  },
+  {
+    label: "Brilliant",
+    value: "Brilliant",
+    imageUrl: "https://i.redd.it/43b08h0mnc5f1.png",
+  },
+  {
+    label: "Great",
+    value: "Great",
+    imageUrl: "https://i.redd.it/m42nhz1mnc5f1.png",
+  },
+  {
+    label: "Book",
+    value: "Book",
+    imageUrl: "https://i.redd.it/jp3hzd0mnc5f1.png",
+  },
+  {
+    label: "Best",
+    value: "Best",
+    imageUrl: "https://i.redd.it/9attuvzlnc5f1.png",
+  },
+  {
+    label: "Excellent",
+    value: "Excellent",
+    imageUrl: "https://i.redd.it/w71hme0mnc5f1.png",
+  },
+  {
+    label: "Good",
+    value: "Good",
+    imageUrl: "https://i.redd.it/8vmmw22mnc5f1.png",
+  },
+  {
+    label: "Inaccuracy",
+    value: "Inaccuracy",
+    imageUrl: "https://i.redd.it/wojij12mnc5f1.png",
+  },
+  {
+    label: "Mistake",
+    value: "Mistake",
+    imageUrl: "https://i.redd.it/d9j1r62mnc5f1.png",
+  },
+  {
+    label: "Miss",
+    value: "Miss",
+    imageUrl: "https://i.redd.it/6xbod32mnc5f1.png",
+  },
+  {
+    label: "Blunder",
+    value: "Blunder",
+    imageUrl: "https://i.redd.it/p5dhke0mnc5f1.png",
+  },
+  {
+    label: "Megablunder",
+    value: "Megablunder",
+    imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
+  },
+] as const;
+
+const COMMENT_REPLY_IMAGE_BY_VALUE = new Map(
+  COMMENT_REPLY_OPTIONS.map((option) => [option.value, option.imageUrl]),
+);
+
+type CommentReplyFormValues = {
+  classification?: string[];
+};
+
+type CommentReplyClassification =
+  (typeof COMMENT_REPLY_OPTIONS)[number]["value"];
 
 async function clearConsensusCache(postId: string): Promise<void> {
   await redis.del(consensusCacheKey(postId, true));
@@ -185,6 +265,12 @@ async function onRequest(
       });
       body = { navigateTo: newPost.url } as UiResponse;
       break;
+    case ApiEndpoint.MenuCommentReplyClassification:
+      body = await onMenuCommentReplyClassification(req);
+      break;
+    case ApiEndpoint.FormCommentReplyClassification:
+      body = await onFormCommentReplyClassification(req);
+      break;
     case ApiEndpoint.VoteBadge:
       body = await onVoteBadge(req);
       break;
@@ -279,6 +365,26 @@ function getUserId(): string {
   const uid = context.userId;
   if (!uid) throw new Error("No userId in context");
   return uid;
+}
+
+function getCommentId(): string {
+  const commentId =
+    (context as typeof context & { commentId?: string }).commentId ??
+    readContextCommentIdFromMetadata();
+  if (!commentId) throw new Error("No commentId in context");
+  return commentId;
+}
+
+function readContextCommentIdFromMetadata(): string | null {
+  const rawContext = context.metadata?.["devvit-context"]?.values?.[0];
+  if (!rawContext) return null;
+
+  try {
+    const parsed = JSON.parse(rawContext) as { commentId?: string };
+    return typeof parsed.commentId === "string" ? parsed.commentId : null;
+  } catch {
+    return null;
+  }
 }
 
 async function assertCanCreatePost(): Promise<void> {
@@ -526,6 +632,159 @@ async function readJSON<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   return JSON.parse(Buffer.concat(chunks).toString()) as T;
+}
+
+function getCommentReplyForm(): Form {
+  return {
+    title: "Reply With Classification Image",
+    acceptLabel: "Reply",
+    fields: [
+      {
+        type: "select",
+        name: "classification",
+        label: "Classification",
+        required: true,
+        multiSelect: false,
+        options: COMMENT_REPLY_OPTIONS.map(({ label, value }) => ({
+          label,
+          value,
+        })),
+      },
+    ],
+  };
+}
+
+async function storeCommentReplyTarget(
+  userId: string,
+  targetId: string,
+): Promise<void> {
+  await redis.set(
+    commentReplyTargetKey(userId),
+    JSON.stringify({
+      targetId,
+      expiresAt: Date.now() + COMMENT_REPLY_TARGET_TTL_MS,
+    }),
+  );
+}
+
+async function readStoredCommentReplyTarget(
+  userId: string,
+): Promise<string | null> {
+  const raw = await redis.get(commentReplyTargetKey(userId));
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      targetId?: string;
+      expiresAt?: number;
+    };
+    if (
+      typeof parsed.targetId !== "string" ||
+      typeof parsed.expiresAt !== "number" ||
+      parsed.expiresAt <= Date.now()
+    ) {
+      return null;
+    }
+    return parsed.targetId;
+  } catch {
+    return null;
+  }
+}
+
+async function clearStoredCommentReplyTarget(userId: string): Promise<void> {
+  await redis.del(commentReplyTargetKey(userId));
+}
+
+async function onMenuCommentReplyClassification(
+  req: IncomingMessage,
+): Promise<UiResponse> {
+  const userId = getUserId();
+  const body = await readJSON<{ location?: string; targetId?: string }>(req);
+  if (body.location !== "comment" || !body.targetId?.startsWith("t1_")) {
+    throw {
+      status: 400,
+      message: "Comment menu action requires a comment target",
+    };
+  }
+
+  await storeCommentReplyTarget(userId, body.targetId);
+
+  return {
+    showForm: {
+      name: COMMENT_REPLY_FORM_NAME,
+      form: getCommentReplyForm(),
+    },
+  };
+}
+
+function isCommentReplyClassification(
+  value: string,
+): value is CommentReplyClassification {
+  return COMMENT_REPLY_OPTIONS.some((option) => option.value === value);
+}
+
+function getSelectedCommentReplyClassification(
+  values: CommentReplyFormValues,
+): CommentReplyClassification | null {
+  const rawValue = values.classification;
+  if (Array.isArray(rawValue) && typeof rawValue[0] === "string") {
+    const selected = rawValue[0];
+    return isCommentReplyClassification(selected) ? selected : null;
+  }
+  return null;
+}
+
+async function onFormCommentReplyClassification(
+  req: IncomingMessage,
+): Promise<UiResponse> {
+  const userId = getUserId();
+  const values = await readJSON<CommentReplyFormValues>(req);
+  const classification = getSelectedCommentReplyClassification(values);
+  const imageUrl = classification
+    ? COMMENT_REPLY_IMAGE_BY_VALUE.get(classification)
+    : undefined;
+
+  if (!classification || !imageUrl) {
+    throw { status: 400, message: "Please choose a valid classification" };
+  }
+
+  const targetId =
+    ((): string | null => {
+      try {
+        return getCommentId();
+      } catch {
+        return null;
+      }
+    })() ?? (await readStoredCommentReplyTarget(userId));
+
+  if (!targetId?.startsWith("t1_")) {
+    throw {
+      status: 400,
+      message: "Could not determine which comment to reply to",
+    };
+  }
+
+  const richtext = new RichTextBuilder().image({ mediaUrl: imageUrl });
+  const postedComment = await reddit.submitComment({
+    id: targetId as `t1_${string}`,
+    richtext,
+    runAs: "USER",
+  });
+
+  await clearStoredCommentReplyTarget(userId);
+
+  const response: UiResponse = {
+    showToast: {
+      text: "Reply posted",
+      appearance: "success",
+    },
+  };
+
+  if (postedComment.url) {
+    response.navigateTo = postedComment.url;
+  }
+
+  return response;
 }
 
 function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
