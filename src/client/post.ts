@@ -682,14 +682,21 @@ function updateOwnPostVotingFooterText(): void {
     eloLoginTextEl.textContent = "Your post is being voted on";
     return;
   }
-  eloLoginTextEl.textContent = `Your post is being voted on (${formatVoteLockCountdown(timeLeftMs)} left)`;
+  eloLoginTextEl.textContent = `Your post is being voted on (${formatVoteLockCountdown(
+    timeLeftMs,
+  )} left)`;
 }
 
 function ensureVoteLockCountdownTimer(): void {
   updateOwnPostVotingFooterText();
   if (voteLockCountdownTimer !== null) return;
   voteLockCountdownTimer = window.setInterval(() => {
-    if (!postData || postData.mode !== "vote" || !isOwnPost() || !isVotingWindowOpen()) {
+    if (
+      !postData ||
+      postData.mode !== "vote" ||
+      !isOwnPost() ||
+      !isVotingWindowOpen()
+    ) {
       clearVoteLockCountdownTimer();
       updateVoteFooter(false);
       return;
