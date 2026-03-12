@@ -79,11 +79,11 @@ const PICKER_CLASSIFICATION_SET = new Set<Classification>(
 );
 
 const COMMENT_REPLY_OPTIONS = [
-  {
-    label: "Superbrilliant",
-    value: "Superbrilliant",
-    imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
-  },
+  // {
+  //   label: "Superbrilliant",
+  //   value: "Superbrilliant",
+  //   imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
+  // },
   {
     label: "Brilliant",
     value: "Brilliant",
@@ -134,11 +134,11 @@ const COMMENT_REPLY_OPTIONS = [
     value: "Blunder",
     imageUrl: "https://i.redd.it/p5dhke0mnc5f1.png",
   },
-  {
-    label: "Megablunder",
-    value: "Megablunder",
-    imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
-  },
+  // {
+  //   label: "Megablunder",
+  //   value: "Megablunder",
+  //   imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
+  // },
 ] as const;
 
 const COMMENT_REPLY_IMAGE_BY_VALUE = new Map(
