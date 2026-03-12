@@ -174,7 +174,7 @@ body {
 .img-dots {
   position: absolute;
   left: 50%;
-  bottom: 28px;
+  bottom: 32px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -182,24 +182,24 @@ body {
   gap: 4px;
   max-width: min(180px, calc(100vw - 150px));
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.48);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 999px;
-  padding: 3px 8px;
+  padding: 3px 4px;
   pointer-events: auto;
 }
 
 .img-dot {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.62);
   border: none;
 }
 
 .img-dot.active {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   background: #fff;
 }
 
@@ -243,16 +243,16 @@ body {
 
 .page-chip {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 14px;
+  right: 24px;
   z-index: 4;
   border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 11px;
+  padding: 2px 5px;
+  font-size: 13px;
   font-weight: 700;
   color: #fff;
-  background: rgba(0, 0, 0, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.24);
 }
 
 .quick-create {
@@ -353,6 +353,14 @@ body {
   transform: translate(-50%, -50%);
   pointer-events: auto;
   cursor: pointer;
+}
+
+.badge--locked {
+  cursor: default;
+}
+
+.badge--passive {
+  cursor: default;
 }
 
 .badge-face {

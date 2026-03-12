@@ -108,7 +108,7 @@ export const BADGE_INFO: Record<
 /** Hints — only Book and Miss */
 export const BADGE_HINTS: Partial<Record<Classification, string>> = {
   [Classification.BOOK]:
-    "A common, expected opener or standard follow-up. Must be the first message or follow another Book.",
+    "A standard opener or expected follow-up. First message only, or following another Book.",
   [Classification.MISS]:
     "Missed an obvious opportunity, cue, or context in the conversation.",
 };

@@ -29,6 +29,7 @@ let viewerUserId = "";
 let viewerIsLoggedIn = false;
 let viewerIsModerator = false;
 let refreshTimer: number | null = null;
+let voteLockCountdownTimer: number | null = null;
 let imageLoadToken = 0;
 let lastBadgeLayoutKey = "";
 let lastUserInteractionAt = 0;
@@ -47,6 +48,10 @@ let navTransitionInFlight = false;
 let queuedNavIndex: number | null = null;
 let postLayoutRaf: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 150;
+const SWIPE_COMMIT_MIN_PX = 48;
+const SWIPE_COMMIT_RATIO = 0.16;
+const SWIPE_SETTLE_DURATION_MS = 160;
+const SWIPE_RESET_DURATION_MS = 220;
 const ELO_THUMB_SIZE_PX = 24;
 const UNVOTED_RING_WIDTH_PX = 1;
 const UNVOTED_RING_DURATION_S = 48;
@@ -79,6 +84,9 @@ let swipeInputMode: "touch" | "pointer" | null = null;
 let swipePointerId: number | null = null;
 let eloPointerId: number | null = null;
 let eloPointerValue: number | null = null;
+let swipeTransformRaf: number | null = null;
+let pendingActiveSwipeDx = 0;
+let pendingPreviewSwipeDx: number | null = null;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -180,6 +188,7 @@ function writeActiveImageIndexToStorage(): void {
 
 function finalizeCommittedPreview(): void {
   if (!committedPreviewImg && !committedPreviewBadges) return;
+  cancelSwipeTransformFrame();
   canvasImg.style.transform = "";
   badgesEl.style.transform = "";
   canvasImg.style.visibility = "";
@@ -199,6 +208,7 @@ function finalizeCommittedPreview(): void {
 }
 
 function clearCanvasDragTransform(): void {
+  cancelSwipeTransformFrame();
   canvasEl.classList.remove("is-dragging");
   canvasImg.style.transition = "";
   badgesEl.style.transition = "";
@@ -207,11 +217,47 @@ function clearCanvasDragTransform(): void {
 }
 
 function clearSwipePreview(): void {
+  pendingPreviewSwipeDx = null;
   swipePreviewImg?.remove();
   swipePreviewBadges?.remove();
   swipePreviewImg = null;
   swipePreviewBadges = null;
   swipePreviewIndex = null;
+}
+
+function translateXPx(px: number): string {
+  return `translate3d(${px.toFixed(2)}px, 0, 0)`;
+}
+
+function cancelSwipeTransformFrame(): void {
+  if (swipeTransformRaf !== null) {
+    window.cancelAnimationFrame(swipeTransformRaf);
+    swipeTransformRaf = null;
+  }
+}
+
+function flushSwipeTransforms(): void {
+  swipeTransformRaf = null;
+  const activeTransform = translateXPx(pendingActiveSwipeDx);
+  canvasImg.style.transform = activeTransform;
+  badgesEl.style.transform = activeTransform;
+
+  if (swipePreviewImg && pendingPreviewSwipeDx !== null) {
+    swipePreviewImg.style.transform = translateXPx(pendingPreviewSwipeDx);
+  }
+  if (swipePreviewBadges && pendingPreviewSwipeDx !== null) {
+    swipePreviewBadges.style.transform = translateXPx(pendingPreviewSwipeDx);
+  }
+}
+
+function scheduleSwipeTransforms(
+  activeDx: number,
+  previewDx: number | null,
+): void {
+  pendingActiveSwipeDx = activeDx;
+  pendingPreviewSwipeDx = previewDx;
+  if (swipeTransformRaf !== null) return;
+  swipeTransformRaf = window.requestAnimationFrame(flushSwipeTransforms);
 }
 
 function preloadImage(imageUrl: string): void {
@@ -264,8 +310,8 @@ function applyImageIndexImmediately(nextIndex: number): void {
   canvasEl.classList.remove("is-dragging");
   canvasImg.style.transition = "none";
   badgesEl.style.transition = "none";
-  canvasImg.style.transform = "translateX(0)";
-  badgesEl.style.transform = "translateX(0)";
+  canvasImg.style.transform = translateXPx(0);
+  badgesEl.style.transform = translateXPx(0);
   canvasImg.style.visibility = "";
   badgesEl.style.visibility = "";
   const image = currentImage();
@@ -302,8 +348,8 @@ function commitSwipeNavigation(nextIndex: number): void {
   badgesEl.style.visibility = "hidden";
   canvasImg.style.transition = "none";
   badgesEl.style.transition = "none";
-  canvasImg.style.transform = "translateX(0)";
-  badgesEl.style.transform = "translateX(0)";
+  canvasImg.style.transform = translateXPx(0);
+  badgesEl.style.transform = translateXPx(0);
   committedPreviewImg = previewImg;
   committedPreviewBadges = previewBadges;
   if (previewImg) {
@@ -341,25 +387,44 @@ function finishSwipeNavigation(nextIndex: number, dx: number): void {
     commitSwipeNavigation(nextIndex);
     return;
   }
-  swipePreviewImg.style.transition = "none";
-  swipePreviewBadges.style.transition = "none";
-  swipePreviewImg.style.transform = "translateX(0)";
-  swipePreviewBadges.style.transform = "translateX(0)";
-  commitSwipeNavigation(nextIndex);
+  cancelSwipeTransformFrame();
+  const travelPx = Math.max(
+    1,
+    canvasEl.clientWidth || canvasEl.getBoundingClientRect().width || 1,
+  );
+  const outgoingToX = dx < 0 ? -travelPx : travelPx;
+  const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+  canvasImg.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  badgesEl.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  swipePreviewImg.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  swipePreviewBadges.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+
+  requestAnimationFrame(() => {
+    canvasImg.style.transform = translateXPx(outgoingToX);
+    badgesEl.style.transform = translateXPx(outgoingToX);
+    swipePreviewImg!.style.transform = translateXPx(0);
+    swipePreviewBadges!.style.transform = translateXPx(0);
+  });
+
+  window.setTimeout(() => {
+    commitSwipeNavigation(nextIndex);
+  }, SWIPE_SETTLE_DURATION_MS + 20);
 }
 
 function animateCanvasDragReset(): void {
+  cancelSwipeTransformFrame();
   canvasEl.classList.remove("is-dragging");
-  canvasImg.style.transition = "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
-  badgesEl.style.transition = "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
-  canvasImg.style.transform = "translateX(0)";
-  badgesEl.style.transform = "translateX(0)";
+  canvasImg.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+  badgesEl.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+  canvasImg.style.transform = translateXPx(0);
+  badgesEl.style.transform = translateXPx(0);
   window.setTimeout(() => {
     canvasImg.style.transition = "";
     badgesEl.style.transition = "";
     canvasImg.style.transform = "";
     badgesEl.style.transform = "";
-  }, 220);
+  }, SWIPE_RESET_DURATION_MS + 40);
 }
 
 function ensureSwipePreview(targetIndex: number, dx: number): boolean {
@@ -415,12 +480,11 @@ function ensureSwipePreview(targetIndex: number, dx: number): boolean {
   const previewX = baseOffset + dx;
   if (swipePreviewImg) {
     swipePreviewImg.style.transition = "none";
-    swipePreviewImg.style.transform = `translateX(${previewX}px)`;
   }
   if (swipePreviewBadges) {
     swipePreviewBadges.style.transition = "none";
-    swipePreviewBadges.style.transform = `translateX(${previewX}px)`;
   }
+  scheduleSwipeTransforms(dx, previewX);
   return true;
 }
 
@@ -584,6 +648,56 @@ function canVoteOnCurrentPost(): boolean {
   );
 }
 
+function getVoteLockTimeLeftMs(): number | null {
+  const createdAtMs = postData?.createdAtMs;
+  if (!createdAtMs) return null;
+  return Math.max(0, createdAtMs + MAX_POST_AGE_TO_VOTE_MS - Date.now());
+}
+
+function formatVoteLockCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours >= 1) {
+    return `${hours}h`;
+  }
+  if (minutes >= 1) {
+    return `${minutes}m`;
+  }
+  return `${seconds}s`;
+}
+
+function clearVoteLockCountdownTimer(): void {
+  if (voteLockCountdownTimer !== null) {
+    window.clearInterval(voteLockCountdownTimer);
+    voteLockCountdownTimer = null;
+  }
+}
+
+function updateOwnPostVotingFooterText(): void {
+  if (!eloLoginTextEl) return;
+  const timeLeftMs = getVoteLockTimeLeftMs();
+  if (timeLeftMs === null) {
+    eloLoginTextEl.textContent = "Your post is being voted on";
+    return;
+  }
+  eloLoginTextEl.textContent = `Your post is being voted on (${formatVoteLockCountdown(timeLeftMs)} left)`;
+}
+
+function ensureVoteLockCountdownTimer(): void {
+  updateOwnPostVotingFooterText();
+  if (voteLockCountdownTimer !== null) return;
+  voteLockCountdownTimer = window.setInterval(() => {
+    if (!postData || postData.mode !== "vote" || !isOwnPost() || !isVotingWindowOpen()) {
+      clearVoteLockCountdownTimer();
+      updateVoteFooter(false);
+      return;
+    }
+    updateOwnPostVotingFooterText();
+  }, 1000);
+}
+
 function updateVoteFooter(initializeElo = false): void {
   if (
     !postData ||
@@ -591,21 +705,22 @@ function updateVoteFooter(initializeElo = false): void {
     isExpandedView ||
     !isVotingWindowOpen()
   ) {
+    clearVoteLockCountdownTimer();
     eloEl.style.display = "none";
     if (eloLoginEl) eloLoginEl.style.display = "none";
     return;
   }
 
   if (isOwnPost()) {
+    clearVoteLockCountdownTimer();
     eloEl.style.display = "none";
-    if (eloLoginTextEl) {
-      eloLoginTextEl.textContent = "Your post is being voted on";
-    }
+    ensureVoteLockCountdownTimer();
     if (eloLoginEl) eloLoginEl.style.display = "flex";
     return;
   }
 
   if (!viewerIsLoggedIn) {
+    clearVoteLockCountdownTimer();
     eloEl.style.display = "none";
     if (eloLoginTextEl) {
       eloLoginTextEl.textContent = "Log in to vote";
@@ -614,6 +729,7 @@ function updateVoteFooter(initializeElo = false): void {
     return;
   }
 
+  clearVoteLockCountdownTimer();
   if (eloLoginEl) eloLoginEl.style.display = "none";
   if (canVoteOnCurrentPost()) {
     eloEl.style.display = "";
@@ -857,6 +973,7 @@ async function init() {
           window.clearInterval(refreshTimer);
           refreshTimer = null;
         }
+        clearVoteLockCountdownTimer();
       });
     }
   } catch (err) {
@@ -948,15 +1065,15 @@ function loadCurrentImage(animate = true) {
     canvasImg.src = image.imageUrl;
     preloadNearbyImages();
     layoutBadges(true);
-    requestAnimationFrame(() => {
-      if (token !== imageLoadToken) return;
-      layoutBadges(true);
-      if (shouldAnimate && directionForAnimation) {
-        playSlideAnimation(directionForAnimation, snapshotForAnimation);
-      } else {
+    if (shouldAnimate && directionForAnimation) {
+      playSlideAnimation(directionForAnimation, snapshotForAnimation);
+    } else {
+      requestAnimationFrame(() => {
+        if (token !== imageLoadToken) return;
+        layoutBadges(true);
         completeNavigationTransition();
-      }
-    });
+      });
+    }
     imageSlideDirection = null;
   };
 
@@ -1165,6 +1282,17 @@ imgNext.addEventListener("click", () => {
   navigateToImage(activeImageIndex + 1);
 });
 
+function openExpandedPost(event: Event): void {
+  if (isExpandedView) return;
+  const expandedUrl = `/post.html?expanded=1&page=${activeImageIndex + 1}`;
+  writeActiveImageIndexToStorage();
+  try {
+    requestExpandedMode(event as unknown as MouseEvent, "expanded");
+  } catch {
+    window.location.href = expandedUrl;
+  }
+}
+
 canvasEl.addEventListener("click", (event) => {
   if (isExpandedView) {
     return;
@@ -1180,7 +1308,9 @@ canvasEl.addEventListener("click", (event) => {
   }
   const target = event.target as HTMLElement;
   const badgeClicksOpenExpanded =
-    !!postData && postData.mode === "vote" && !isVotingWindowOpen();
+    !!postData &&
+    target.closest(".badge") &&
+    !(postData.mode === "vote" && canVoteOnCurrentPost());
   if (
     (target.closest(".badge") && !badgeClicksOpenExpanded) ||
     target.closest(".img-nav-btn") ||
@@ -1191,13 +1321,7 @@ canvasEl.addEventListener("click", (event) => {
   ) {
     return;
   }
-  const expandedUrl = `/post.html?expanded=1&page=${activeImageIndex + 1}`;
-  writeActiveImageIndexToStorage();
-  try {
-    requestExpandedMode(event as unknown as MouseEvent, "expanded");
-  } catch {
-    window.location.href = expandedUrl;
-  }
+  openExpandedPost(event);
 });
 
 function layoutBadges(force = false) {
@@ -1255,7 +1379,13 @@ function renderBadgesInto(
     const hasConsensus =
       !!c?.classification && c.totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS;
     const isLiveVoteWindow = pd.mode === "vote" && isVotingWindowOpen();
+    const opensExpandedOnTap =
+      !isExpandedView && !(pd.mode === "vote" && canVoteOnCurrentPost());
     let badgeImageUrl: string | null = null;
+
+    if (opensExpandedOnTap) {
+      el.classList.add("badge--passive");
+    }
 
     if (pd.mode === "annotated" && p.classification) {
       el.classList.add("badge--voted");
@@ -1280,6 +1410,11 @@ function renderBadgesInto(
       }
 
       if (pd.mode === "vote") {
+        if (!isLiveVoteWindow) {
+          el.classList.add("badge--locked");
+          el.style.pointerEvents = "none";
+        }
+
         if (!uv && canVoteOnCurrentPost()) {
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
@@ -1319,6 +1454,12 @@ function renderBadgesInto(
         }
         markUserInteraction();
         openPicker(p);
+      });
+    } else if (interactive && opensExpandedOnTap) {
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openExpandedPost(event);
       });
     }
 
@@ -1722,18 +1863,17 @@ function updateSwipe(clientX: number, clientY: number): boolean {
   const wantsNext = dx < 0;
   const targetIndex = activeImageIndex + (wantsNext ? 1 : -1);
   const canNavigate = targetIndex >= 0 && targetIndex < postData.images.length;
-  const adjustedDx = canNavigate ? dx : dx * 0.2;
+  const adjustedDx = Math.round(canNavigate ? dx : dx * 0.16);
   swipeLastDx = adjustedDx;
   suppressCanvasExpandUntil = Date.now() + 400;
   suppressCanvasClickUntil = Date.now() + 400;
   canvasEl.classList.add("is-dragging");
   canvasImg.style.transition = "none";
   badgesEl.style.transition = "none";
-  canvasImg.style.transform = `translateX(${adjustedDx}px)`;
-  badgesEl.style.transform = `translateX(${adjustedDx}px)`;
   if (canNavigate) {
     ensureSwipePreview(targetIndex, adjustedDx);
   } else {
+    scheduleSwipeTransforms(adjustedDx, null);
     clearSwipePreview();
   }
   return true;
@@ -1770,9 +1910,19 @@ function endSwipe(clientX: number, clientY: number): void {
   }
   const nextIndex = activeImageIndex + (dx < 0 ? 1 : -1);
   const canNavigate = nextIndex >= 0 && nextIndex < postData.images.length;
+  const commitThreshold = Math.min(
+    84,
+    Math.max(
+      SWIPE_COMMIT_MIN_PX,
+      Math.round(
+        (canvasEl.clientWidth || canvasEl.getBoundingClientRect().width || 0) *
+          SWIPE_COMMIT_RATIO,
+      ),
+    ),
+  );
   if (
     canNavigate &&
-    Math.abs(dx) >= 56 &&
+    Math.abs(dx) >= commitThreshold &&
     swipePreviewIndex === nextIndex &&
     swipePreviewImg &&
     swipePreviewBadges
