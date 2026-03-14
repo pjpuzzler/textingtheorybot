@@ -583,7 +583,9 @@ async function isBookVoteAllowedForUser(
   userId: string,
   badgeId: string,
 ): Promise<boolean> {
-  const currentUserVotes = await redis.hGetAll(userVotesKey(getPostId(), userId));
+  const currentUserVotes = await redis.hGetAll(
+    userVotesKey(getPostId(), userId),
+  );
   const placements = postData.images
     .flatMap((image) => image.placements)
     .slice()

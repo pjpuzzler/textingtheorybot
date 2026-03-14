@@ -285,7 +285,10 @@ function getOrCreatePreloadedImage(imageUrl: string): HTMLImageElement | null {
 function onImageReady(img: HTMLImageElement, callback: () => void): void {
   if (img.complete) {
     if (typeof img.decode === "function") {
-      void img.decode().catch(() => undefined).finally(callback);
+      void img
+        .decode()
+        .catch(() => undefined)
+        .finally(callback);
       return;
     }
     callback();
@@ -1642,12 +1645,7 @@ function openPicker(p: BadgePlacement) {
   const bookValid = isBookValidForVote(p);
 
   for (const cls of getPickerClassifications(bookValid)) {
-    const item = createPickerItem(
-      cls,
-      currentVote,
-      p,
-      false,
-    );
+    const item = createPickerItem(cls, currentVote, p, false);
     grid.appendChild(item);
   }
 
