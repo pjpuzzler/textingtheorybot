@@ -44,12 +44,20 @@ body {
   overscroll-behavior-x: none;
 }
 
+body {
+  position: relative;
+}
+
 .loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--tt-bg);
 }
 
 .spinner {
@@ -59,6 +67,12 @@ body {
   border-top-color: var(--tt-accent-bg);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.loading.is-visible .spinner {
+  opacity: 1;
 }
 
 @keyframes spin {
@@ -72,6 +86,12 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.post.is-ready {
+  opacity: 1;
 }
 
 .canvas {
@@ -174,18 +194,18 @@ body {
 .img-dots {
   position: absolute;
   left: 50%;
-  bottom: 32px;
+  bottom: 24px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 7px;
   max-width: min(180px, calc(100vw - 150px));
   overflow: hidden;
   background: rgba(0, 0, 0, 0.66);
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 999px;
-  padding: 3px 4px;
+  padding: 3px 8px;
   pointer-events: auto;
 }
 
@@ -243,13 +263,13 @@ body {
 
 .page-chip {
   position: absolute;
-  top: 14px;
-  right: 24px;
+  top: 8px;
+  right: 8px;
   z-index: 4;
   border-radius: 999px;
-  padding: 2px 5px;
+  padding: 1px 4px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
   background: rgba(0, 0, 0, 0.68);
   border: 1px solid rgba(255, 255, 255, 0.24);
@@ -349,6 +369,7 @@ body {
 
 .badge {
   position: absolute;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: auto;
@@ -398,26 +419,20 @@ body {
   content: "";
   position: absolute;
   inset: calc(var(--ring-width, 1px) * -1);
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: none;
   background: conic-gradient(
-    from 0deg,
-    #26c2a3 0deg 25deg,
-    transparent 25deg 45deg,
-    #749bbf 45deg 70deg,
-    transparent 70deg 90deg,
-    #81b64c 90deg 115deg,
-    transparent 115deg 135deg,
-    #95b776 135deg 160deg,
-    transparent 160deg 180deg,
-    #f7c631 180deg 205deg,
-    transparent 205deg 225deg,
-    #ffa459 225deg 250deg,
-    transparent 250deg 270deg,
-    #ff7769 270deg 295deg,
-    transparent 295deg 315deg,
-    #fa412d 315deg 340deg,
-    transparent 340deg 360deg
+    from 180deg,
+    #fa412d 0deg,
+    #ff7769 38deg,
+    #ffa459 78deg,
+    #f7c631 118deg,
+    #95b776 168deg,
+    #81b64c 214deg,
+    #749bbf 274deg,
+    #26c2a3 332deg,
+    #fa412d 360deg
   );
   -webkit-mask: radial-gradient(
     farthest-side,
@@ -429,40 +444,44 @@ body {
     transparent calc(100% - var(--ring-width, 1px)),
     #000 calc(100% - var(--ring-width, 1px))
   );
-  animation: ring-spin var(--ring-duration, 48s) linear infinite;
+  opacity: 1;
+  filter: none;
+  animation: ring-spin 5.2s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
+}
+
+.badge--ring::after {
+  content: none;
 }
 
 .badges--ghost .badge--ring::before {
   animation: none !important;
 }
 
+.badges--ghost .badge--ring::after {
+  content: none;
+}
+
 .badge--ring-ghost::before {
   content: "";
   position: absolute;
   inset: calc(var(--ring-width, 1px) * -1);
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: none;
   background: conic-gradient(
-    from 0deg,
-    #26c2a3 0deg 25deg,
-    transparent 25deg 45deg,
-    #749bbf 45deg 70deg,
-    transparent 70deg 90deg,
-    #81b64c 90deg 115deg,
-    transparent 115deg 135deg,
-    #95b776 135deg 160deg,
-    transparent 160deg 180deg,
-    #f7c631 180deg 205deg,
-    transparent 205deg 225deg,
-    #ffa459 225deg 250deg,
-    transparent 250deg 270deg,
-    #ff7769 270deg 295deg,
-    transparent 295deg 315deg,
-    #fa412d 315deg 340deg,
-    transparent 340deg 360deg
+    from 180deg,
+    #fa412d 0deg,
+    #ff7769 38deg,
+    #ffa459 78deg,
+    #f7c631 118deg,
+    #95b776 168deg,
+    #81b64c 214deg,
+    #749bbf 274deg,
+    #26c2a3 332deg,
+    #fa412d 360deg
   );
   -webkit-mask: radial-gradient(
     farthest-side,
@@ -474,6 +493,7 @@ body {
     transparent calc(100% - var(--ring-width, 1px)),
     #000 calc(100% - var(--ring-width, 1px))
   );
+  opacity: 1;
 }
 
 @keyframes ring-spin {

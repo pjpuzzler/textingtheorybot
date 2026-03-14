@@ -4,7 +4,7 @@
 
 // --- Tuning constants (single source of truth) ---
 
-export const MIN_VOTES_FOR_BADGE_CONSENSUS = 10;
+export const MIN_VOTES_FOR_BADGE_CONSENSUS = 1;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
 export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
 export const MIN_VOTES_FOR_USER_FLAIR: number =
@@ -22,10 +22,11 @@ export const MAX_POST_IMAGES: number = MAX_VOTE_POST_IMAGES;
 export const Classification = {
   BRILLIANT: "Brilliant",
   GREAT: "Great",
-  BOOK: "Book",
   BEST: "Best",
   EXCELLENT: "Excellent",
   GOOD: "Good",
+  BOOK: "Book",
+  FORCED: "Forced",
   INACCURACY: "Inaccuracy",
   MISTAKE: "Mistake",
   MISS: "Miss",
@@ -40,10 +41,11 @@ export type Classification =
 export const PICKER_CLASSIFICATIONS: Classification[] = [
   Classification.BRILLIANT,
   Classification.GREAT,
-  Classification.BOOK,
   Classification.BEST,
   Classification.EXCELLENT,
   Classification.GOOD,
+  Classification.BOOK,
+  Classification.FORCED,
   Classification.INACCURACY,
   Classification.MISTAKE,
   Classification.MISS,
@@ -58,8 +60,9 @@ export const CLASSIFICATION_WEIGHT: Record<Classification, number> = {
   [Classification.GREAT]: 2,
   [Classification.BEST]: 1,
   [Classification.EXCELLENT]: 0.5,
-  [Classification.BOOK]: 0,
   [Classification.GOOD]: 0,
+  [Classification.BOOK]: 0,
+  [Classification.FORCED]: 0,
   [Classification.INACCURACY]: -0.5,
   [Classification.MISTAKE]: -1,
   [Classification.MISS]: -1,
@@ -78,7 +81,6 @@ export const BADGE_INFO: Record<
     label: "Brilliant",
   },
   [Classification.GREAT]: { symbol: "!", color: "#749bbf", label: "Great" },
-  [Classification.BOOK]: { symbol: "📖", color: "#d5a47d", label: "Book" },
   [Classification.BEST]: { symbol: "★", color: "#81b64c", label: "Best" },
   [Classification.EXCELLENT]: {
     symbol: "👍",
@@ -86,6 +88,12 @@ export const BADGE_INFO: Record<
     label: "Excellent",
   },
   [Classification.GOOD]: { symbol: "✓", color: "#95b776", label: "Good" },
+  [Classification.BOOK]: { symbol: "📖", color: "#d5a47d", label: "Book" },
+  [Classification.FORCED]: {
+    symbol: "!",
+    color: "#95b776",
+    label: "Forced",
+  },
   [Classification.INACCURACY]: {
     symbol: "?!",
     color: "#f7c631",
@@ -105,10 +113,12 @@ export const BADGE_INFO: Record<
   },
 };
 
-/** Hints — only Book and Miss */
+/** Hints — special classifications */
 export const BADGE_HINTS: Partial<Record<Classification, string>> = {
   [Classification.BOOK]:
-    "A standard opener or expected follow-up. First message only, or following another Book.",
+    "A standard opening message or typical response(s) that follow.",
+  [Classification.FORCED]:
+    "The only message that can realistically be sent in this position.",
   [Classification.MISS]:
     "Missed an obvious opportunity, cue, or context in the conversation.",
 };
@@ -170,7 +180,6 @@ export type BadgeConsensus = {
 export type InitResponse = {
   type: "init";
   postId: string;
-  username: string;
   userId: string;
   isOwnPost: boolean;
   isModerator: boolean;
@@ -311,6 +320,13 @@ export function iqmToClassification(
       (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
     if (bookIqmShare > BOOK_MISS_IQM_MAJORITY) {
       return Classification.BOOK;
+    }
+
+    const forcedIqmShare =
+      (iqmVoteMass.byClassification[Classification.FORCED] ?? 0) /
+      iqmTotalVotes;
+    if (forcedIqmShare > BOOK_MISS_IQM_MAJORITY) {
+      return Classification.FORCED;
     }
 
     const missIqmShare =

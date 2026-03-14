@@ -578,6 +578,24 @@ function isValidBadgeVoteClassification(
   return PICKER_CLASSIFICATION_SET.has(classification as Classification);
 }
 
+async function isBookVoteAllowedForUser(
+  postData: PostData,
+  userId: string,
+  badgeId: string,
+): Promise<boolean> {
+  const currentUserVotes = await redis.hGetAll(userVotesKey(getPostId(), userId));
+  const placements = postData.images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const idx = placements.findIndex((placement) => placement.id === badgeId);
+  if (idx < 0) return false;
+  if (idx === 0) return true;
+  const prev = placements[idx - 1];
+  if (!prev) return false;
+  return currentUserVotes[prev.id] === Classification.BOOK;
+}
+
 function getTitleEmoji(elo: number): string {
   if (elo >= 2500) return ":gm:";
   if (elo >= 2400) return ":im:";
@@ -802,15 +820,28 @@ function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
   const userId = context.userId ?? "";
-  const currentUsername = await reddit.getCurrentUsername();
-  const username = currentUsername ?? "unknown";
-  const isModerator = await isCurrentUserModerator(currentUsername);
 
   let postData: PostData | null = null;
   try {
     postData = await getPostData(postId);
   } catch {
     /* no post data */
+  }
+
+  if (!postData) {
+    return {
+      type: "init",
+      postId,
+      userId,
+      isOwnPost: false,
+      isModerator: false,
+      postData: null,
+      consensus: {},
+      userVotes: {},
+      userElo: null,
+      consensusElo: null,
+      eloVoteCount: 0,
+    };
   }
 
   // Badge consensus
@@ -822,75 +853,69 @@ async function onInit(): Promise<InitResponse> {
   let consensusElo: number | null = null;
   let eloVoteCount = 0;
 
-  if (postData) {
-    const [uvRaw, userEloRaw, allEloRaw] = await Promise.all([
-      userId
-        ? redis.hGetAll(userVotesKey(postId, userId))
-        : Promise.resolve({}),
-      userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
-      redis.get(eloVotesKey(postId)),
-    ]);
+  const [uvRaw, userEloRaw, allEloRaw, isModerator] = await Promise.all([
+    userId ? redis.hGetAll(userVotesKey(postId, userId)) : Promise.resolve({}),
+    userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
+    redis.get(eloVotesKey(postId)),
+    userId ? isCurrentUserModerator() : Promise.resolve(false),
+  ]);
 
-    for (const [bid, cls] of Object.entries(uvRaw)) {
-      userVotes[bid] = cls as Classification;
+  for (const [bid, cls] of Object.entries(uvRaw)) {
+    userVotes[bid] = cls as Classification;
+  }
+
+  if (userEloRaw) userElo = Number(userEloRaw);
+  if (allEloRaw) {
+    const eloArr = JSON.parse(allEloRaw) as number[];
+    eloVoteCount = eloArr.length;
+    if (eloArr.length > 0) {
+      consensusElo = Math.round(interquartileMean(eloArr));
     }
+  }
 
-    if (userEloRaw) userElo = Number(userEloRaw);
-    if (allEloRaw) {
-      const eloArr = JSON.parse(allEloRaw) as number[];
-      eloVoteCount = eloArr.length;
-      if (eloArr.length > 0) {
-        consensusElo = Math.round(interquartileMean(eloArr));
-      }
-    }
+  await finalizeEloIfTimedOut(postId, postData);
 
-    await finalizeEloIfTimedOut(postId, postData);
-
-    if (postData.mode === "vote") {
-      const voteWindowOpen = isVoteWindowOpen(postData);
-      const cachedConsensus = await readConsensusCache(postId, voteWindowOpen);
-      if (cachedConsensus) {
-        Object.assign(consensus, cachedConsensus);
-      } else {
-        const placementList = getAllPlacements(postData).map(
-          ({ placement }) => placement,
-        );
-        const consensusEntries = await Promise.all(
-          placementList.map(async (placement) => {
-            const allVotes = await redis.hGetAll(
-              votesKey(postId, placement.id),
+  if (postData.mode === "vote") {
+    const voteWindowOpen = isVoteWindowOpen(postData);
+    const cachedConsensus = await readConsensusCache(postId, voteWindowOpen);
+    if (cachedConsensus) {
+      Object.assign(consensus, cachedConsensus);
+    } else {
+      const placementList = getAllPlacements(postData).map(
+        ({ placement }) => placement,
+      );
+      const consensusEntries = await Promise.all(
+        placementList.map(async (placement) => {
+          const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+          const computed = computeBadgeConsensus(allVotes);
+          if (
+            !voteWindowOpen &&
+            !computed.classification &&
+            computed.totalVotes > 0
+          ) {
+            computed.classification = iqmToClassification(
+              computed.iqm,
+              computed.voteCounts,
+              computed.totalVotes,
             );
-            const computed = computeBadgeConsensus(allVotes);
-            if (
-              !voteWindowOpen &&
-              !computed.classification &&
-              computed.totalVotes > 0
-            ) {
-              computed.classification = iqmToClassification(
-                computed.iqm,
-                computed.voteCounts,
-                computed.totalVotes,
-              );
-            }
-            return [placement.id, computed] as const;
-          }),
-        );
+          }
+          return [placement.id, computed] as const;
+        }),
+      );
 
-        for (const [placementId, computed] of consensusEntries) {
-          consensus[placementId] = computed;
-        }
-
-        await writeConsensusCache(postId, voteWindowOpen, consensus);
+      for (const [placementId, computed] of consensusEntries) {
+        consensus[placementId] = computed;
       }
+
+      await writeConsensusCache(postId, voteWindowOpen, consensus);
     }
   }
 
   return {
     type: "init",
     postId,
-    username,
     userId,
-    isOwnPost: !!postData && !!userId && postData.creatorId === userId,
+    isOwnPost: !!userId && postData.creatorId === userId,
     isModerator,
     postData,
     consensus,
@@ -1150,6 +1175,21 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
     ({ placement }) => placement.id === body.badgeId,
   );
   if (!found) throw new Error("Badge not found");
+
+  const bookVoteAllowed = await isBookVoteAllowedForUser(
+    postData,
+    userId,
+    body.badgeId,
+  );
+  if (body.classification === Classification.BOOK && !bookVoteAllowed) {
+    throw { status: 400, message: "Book is not available for this badge" };
+  }
+  if (body.classification === Classification.FORCED && bookVoteAllowed) {
+    throw {
+      status: 400,
+      message: "Forced is only available when Book is disabled",
+    };
+  }
 
   const eligible = await isEligibleVoter(postData, userId);
 
@@ -1443,7 +1483,7 @@ async function tryUpdateUserFlair(
       subject: `Your user flair on r/${subredditName} has been updated`,
       text: `Your [post](${postUrl}) on r/${subredditName} has closed voting after 24 hours with ${formattedVoteCount} Elo ${
         voteCountAtTimeout === 1 ? "vote" : "votes"
-      }. Final consensus is ${elo} Elo, and your user flair has been updated automatically. You can clear or change your flair at any time from subreddit flair settings.`,
+      }. Final consensus is **${elo} Elo**, and your user flair has been updated automatically. You can clear or change your flair at any time from subreddit flair settings.`,
       to: author.username,
     });
   } catch (err) {

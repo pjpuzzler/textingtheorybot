@@ -4,7 +4,6 @@ import {
   BADGE_INFO,
   BADGE_HINTS,
   Classification,
-  PICKER_CLASSIFICATIONS,
   getEloColor,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
   MAX_POST_AGE_TO_VOTE_MS,
@@ -47,14 +46,18 @@ let pendingSlideSnapshot: {
 let navTransitionInFlight = false;
 let queuedNavIndex: number | null = null;
 let postLayoutRaf: number | null = null;
-const PAGE_SLIDE_DURATION_MS = 150;
+let loadingIndicatorTimer: number | null = null;
+let loadingIndicatorShownAt = 0;
+let loadingIndicatorHideTimer: number | null = null;
+const PAGE_SLIDE_DURATION_MS = 210;
+const LOADING_INDICATOR_DELAY_MS = 90;
+const LOADING_INDICATOR_MIN_VISIBLE_MS = 140;
 const SWIPE_COMMIT_MIN_PX = 48;
 const SWIPE_COMMIT_RATIO = 0.16;
-const SWIPE_SETTLE_DURATION_MS = 160;
-const SWIPE_RESET_DURATION_MS = 220;
+const SWIPE_SETTLE_DURATION_MS = 215;
+const SWIPE_RESET_DURATION_MS = 260;
 const ELO_THUMB_SIZE_PX = 24;
-const UNVOTED_RING_WIDTH_PX = 1;
-const UNVOTED_RING_DURATION_S = 48;
+const UNVOTED_RING_WIDTH_PX = 2;
 const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
 const PICKER_ITEM_CLICK_FALLBACK_GUARD_MS = 500;
 const PICKER_CLOSE_GUARD_AFTER_OPEN_MS = 180;
@@ -266,6 +269,37 @@ function preloadImage(imageUrl: string): void {
   img.decoding = "async";
   img.src = imageUrl;
   imagePreloadCache.set(imageUrl, img);
+}
+
+function getOrCreatePreloadedImage(imageUrl: string): HTMLImageElement | null {
+  if (!imageUrl) return null;
+  const cached = imagePreloadCache.get(imageUrl);
+  if (cached) return cached;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = imageUrl;
+  imagePreloadCache.set(imageUrl, img);
+  return img;
+}
+
+function onImageReady(img: HTMLImageElement, callback: () => void): void {
+  if (img.complete) {
+    if (typeof img.decode === "function") {
+      void img.decode().catch(() => undefined).finally(callback);
+      return;
+    }
+    callback();
+    return;
+  }
+
+  const handleReady = () => {
+    img.removeEventListener("load", handleReady);
+    img.removeEventListener("error", handleReady);
+    callback();
+  };
+
+  img.addEventListener("load", handleReady, { once: true });
+  img.addEventListener("error", handleReady, { once: true });
 }
 
 function preloadImageAtIndex(index: number): void {
@@ -533,6 +567,75 @@ async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
   }
 }
 
+function startLoadingIndicator(): void {
+  stopLoadingIndicator();
+  loadingEl.style.display = "flex";
+  loadingIndicatorTimer = window.setTimeout(() => {
+    loadingIndicatorTimer = null;
+    loadingIndicatorShownAt = Date.now();
+    loadingEl.classList.add("is-visible");
+  }, LOADING_INDICATOR_DELAY_MS);
+}
+
+function stopLoadingIndicator(): void {
+  if (loadingIndicatorTimer !== null) {
+    window.clearTimeout(loadingIndicatorTimer);
+    loadingIndicatorTimer = null;
+  }
+  if (loadingIndicatorHideTimer !== null) {
+    window.clearTimeout(loadingIndicatorHideTimer);
+    loadingIndicatorHideTimer = null;
+  }
+
+  if (!loadingEl.classList.contains("is-visible")) {
+    loadingIndicatorShownAt = 0;
+    loadingEl.classList.remove("is-visible");
+    loadingEl.style.display = "none";
+    return;
+  }
+
+  const elapsedVisibleMs = loadingIndicatorShownAt
+    ? Date.now() - loadingIndicatorShownAt
+    : LOADING_INDICATOR_MIN_VISIBLE_MS;
+  const remainingVisibleMs = Math.max(
+    0,
+    LOADING_INDICATOR_MIN_VISIBLE_MS - elapsedVisibleMs,
+  );
+
+  const hide = () => {
+    loadingIndicatorShownAt = 0;
+    loadingIndicatorHideTimer = null;
+    loadingEl.classList.remove("is-visible");
+    loadingEl.style.display = "none";
+  };
+
+  if (remainingVisibleMs === 0) {
+    hide();
+    return;
+  }
+
+  loadingIndicatorHideTimer = window.setTimeout(hide, remainingVisibleMs);
+}
+
+function beginInitialPostReveal(): void {
+  postEl.style.display = "flex";
+  postEl.classList.remove("is-ready");
+}
+
+function completeInitialPostReveal(): void {
+  postEl.classList.add("is-ready");
+  stopLoadingIndicator();
+}
+
+async function waitForCurrentImageReady(): Promise<void> {
+  const imageUrl = currentImage()?.imageUrl;
+  const preloader = imageUrl ? getOrCreatePreloadedImage(imageUrl) : null;
+  if (!preloader) return;
+  await new Promise<void>((resolve) => {
+    onImageReady(preloader, resolve);
+  });
+}
+
 function schedulePostLayoutRefresh(): void {
   if (postLayoutRaf !== null) return;
   postLayoutRaf = window.requestAnimationFrame(() => {
@@ -556,7 +659,22 @@ function ringPhaseDelaySeconds(): number {
     typeof performance !== "undefined" && typeof performance.now === "function"
       ? performance.now()
       : Date.now();
-  return -((nowMs % (UNVOTED_RING_DURATION_S * 1000)) / 1000);
+  return -((nowMs % 1800) / 1000);
+}
+
+function getPickerClassifications(bookValid: boolean): Classification[] {
+  return [
+    Classification.BRILLIANT,
+    Classification.GREAT,
+    Classification.BEST,
+    Classification.EXCELLENT,
+    Classification.GOOD,
+    bookValid ? Classification.BOOK : Classification.FORCED,
+    Classification.INACCURACY,
+    Classification.MISTAKE,
+    Classification.MISS,
+    Classification.BLUNDER,
+  ];
 }
 
 function applyBadgeVisibility(): void {
@@ -882,6 +1000,7 @@ function applyEloTrackVisuals(): void {
 }
 
 async function init() {
+  startLoadingIndicator();
   try {
     let res: Response;
     if (isExpandedView) {
@@ -910,9 +1029,10 @@ async function init() {
     viewerIsLoggedIn = !!data.userId;
     viewerIsModerator = !!data.isModerator;
 
-    loadingEl.style.display = "none";
-
     if (!postData) {
+      postEl.classList.remove("is-ready");
+      postEl.style.display = "none";
+      stopLoadingIndicator();
       createPrompt.style.display = "flex";
       createBtn.addEventListener("click", (event) => {
         try {
@@ -924,7 +1044,8 @@ async function init() {
       return;
     }
 
-    postEl.style.display = "flex";
+    createPrompt.style.display = "none";
+    beginInitialPostReveal();
     activeImageIndex = readInitialImageIndex(postData.images.length);
     badgeVisToggleBtn.addEventListener("click", (event) => {
       event.preventDefault();
@@ -967,8 +1088,10 @@ async function init() {
     if (postData.images.length > 1) imageNav.style.display = "flex";
     updateImageNav();
     preloadNearbyImages();
+    await waitForCurrentImageReady();
     loadCurrentImage(false);
     updateVoteFooter(true);
+    completeInitialPostReveal();
 
     if (refreshTimer === null && isExpandedView) {
       const refreshMs = 6000;
@@ -985,7 +1108,9 @@ async function init() {
     }
   } catch (err) {
     console.error("Init failed:", err);
-    loadingEl.style.display = "none";
+    postEl.classList.remove("is-ready");
+    postEl.style.display = "none";
+    stopLoadingIndicator();
     createPrompt.style.display = "flex";
     const titleEl = createPrompt.querySelector(
       ".create-title",
@@ -1091,11 +1216,12 @@ function loadCurrentImage(animate = true) {
     return;
   }
 
-  const preloader = new Image();
-  preloader.decoding = "async";
-  preloader.onload = finalizeLoadedImage;
-  preloader.onerror = finalizeLoadedImage;
-  preloader.src = imageUrl;
+  const preloader = getOrCreatePreloadedImage(imageUrl);
+  if (!preloader) {
+    finalizeLoadedImage();
+    return;
+  }
+  onImageReady(preloader, finalizeLoadedImage);
 }
 
 function playSlideAnimation(
@@ -1426,10 +1552,6 @@ function renderBadgesInto(
           el.classList.add("badge--ring");
           el.classList.add("badge--tappable");
           el.style.setProperty("--ring-delay", `${ringPhaseDelaySeconds()}s`);
-          el.style.setProperty(
-            "--ring-duration",
-            `${UNVOTED_RING_DURATION_S}s`,
-          );
           el.style.setProperty("--ring-width", `${UNVOTED_RING_WIDTH_PX}px`);
         }
 
@@ -1519,12 +1641,12 @@ function openPicker(p: BadgePlacement) {
 
   const bookValid = isBookValidForVote(p);
 
-  for (const cls of PICKER_CLASSIFICATIONS) {
+  for (const cls of getPickerClassifications(bookValid)) {
     const item = createPickerItem(
       cls,
       currentVote,
       p,
-      cls === Classification.BOOK && !bookValid,
+      false,
     );
     grid.appendChild(item);
   }

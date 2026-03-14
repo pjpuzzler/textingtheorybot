@@ -24,6 +24,7 @@ const clientOpts: BuildOptions = {
   format: "esm",
   outdir: "public",
   platform: "browser",
+  target: ["es2020", "ios14", "safari14"],
 };
 const serverOpts: BuildOptions = {
   ...opts,
