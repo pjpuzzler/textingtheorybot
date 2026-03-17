@@ -1205,7 +1205,8 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   if (isResultVote(body.classification) && !resultVoteAllowed) {
     throw {
       status: 400,
-      message: "Result votes are only available on the final badge when there is more than one badge",
+      message:
+        "Result votes are only available on the final badge when there is more than one badge",
     };
   }
 

@@ -2366,16 +2366,18 @@ function isBookValid(p: BadgePlacement): boolean {
 }
 
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
-  pickerTitle.textContent = mode === "annotated"
-    ? "Choose Badge"
-    : "Choose Classification (Best → Worst)";
+  pickerTitle.textContent =
+    mode === "annotated"
+      ? "Choose Badge"
+      : "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   suppressEditorPickerUntil = Date.now() + 120;
   suppressEditorPickerBackdropUntil =
     Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
-  grid.className = mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
+  grid.className =
+    mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
 
   const bookValid = isBookValid(p);
 
