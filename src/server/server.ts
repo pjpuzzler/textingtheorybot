@@ -9,6 +9,7 @@ import {
   Classification,
   CLASSIFICATION_WEIGHT,
   PICKER_CLASSIFICATIONS,
+  RESULT_PICKER_OPTIONS,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
   MIN_VOTES_FOR_POST_FLAIR,
   MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
@@ -18,6 +19,8 @@ import {
   MAX_VOTE_POST_IMAGES,
   MAX_ANNOTATED_POST_IMAGES,
   interquartileMean,
+  isClassification,
+  isResultVote,
   iqmToClassification,
   getEloColor,
   type CreatePostRequest,
@@ -29,9 +32,11 @@ import {
   type VoteBadgeResponse,
   type VoteEloRequest,
   type VoteEloResponse,
+  type BadgeVoteOption,
   type PostData,
   type PostImageData,
   type BadgeConsensus,
+  type ResultVote,
 } from "../shared/api.ts";
 
 const TITLE_ME_VOTE_REGEX = /^\[me\b.*\]/i;
@@ -69,14 +74,15 @@ const eloNoCountFlairAppliedKey = (pid: string) =>
 const moderatorCacheKey = (subredditName: string, username: string) =>
   `tt:moderator:${subredditName}:${username}`;
 const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
-  `tt:consensus:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+  `tt:consensus:v2:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
-  `tt:consensus-meta:v1:${pid}:${voteWindowOpen ? "open" : "closed"}`;
+  `tt:consensus-meta:v2:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const commentReplyTargetKey = (userId: string) =>
   `tt:comment-reply-target:v1:${userId}`;
-const PICKER_CLASSIFICATION_SET = new Set<Classification>(
-  PICKER_CLASSIFICATIONS,
-);
+const PICKER_VOTE_SET = new Set<BadgeVoteOption>([
+  ...PICKER_CLASSIFICATIONS,
+  ...RESULT_PICKER_OPTIONS,
+]);
 
 const COMMENT_REPLY_OPTIONS = [
   // {
@@ -574,8 +580,23 @@ async function isEligibleVoter(
 
 function isValidBadgeVoteClassification(
   classification: string,
-): classification is Classification {
-  return PICKER_CLASSIFICATION_SET.has(classification as Classification);
+): classification is BadgeVoteOption {
+  return PICKER_VOTE_SET.has(classification as BadgeVoteOption);
+}
+
+function isResultVoteAllowedForBadge(
+  postData: PostData,
+  badgeId: string,
+): boolean {
+  const placements = postData.images
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (placements.length <= 1) {
+    return false;
+  }
+  const lastPlacement = placements[placements.length - 1];
+  return lastPlacement?.id === badgeId;
 }
 
 async function isBookVoteAllowedForUser(
@@ -848,7 +869,7 @@ async function onInit(): Promise<InitResponse> {
 
   // Badge consensus
   const consensus: Record<string, BadgeConsensus> = {};
-  const userVotes: Record<string, Classification> = {};
+  const userVotes: Record<string, BadgeVoteOption> = {};
 
   // ELO
   let userElo: number | null = null;
@@ -863,7 +884,9 @@ async function onInit(): Promise<InitResponse> {
   ]);
 
   for (const [bid, cls] of Object.entries(uvRaw)) {
-    userVotes[bid] = cls as Classification;
+    if (typeof cls === "string" && isValidBadgeVoteClassification(cls)) {
+      userVotes[bid] = cls;
+    }
   }
 
   if (userEloRaw) userElo = Number(userEloRaw);
@@ -1177,6 +1200,14 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
     ({ placement }) => placement.id === body.badgeId,
   );
   if (!found) throw new Error("Badge not found");
+
+  const resultVoteAllowed = isResultVoteAllowedForBadge(postData, body.badgeId);
+  if (isResultVote(body.classification) && !resultVoteAllowed) {
+    throw {
+      status: 400,
+      message: "Result votes are only available on the final badge when there is more than one badge",
+    };
+  }
 
   const bookVoteAllowed = await isBookVoteAllowedForUser(
     postData,
@@ -1500,28 +1531,94 @@ function computeBadgeConsensus(
   allVotes: Record<string, string>,
 ): BadgeConsensus {
   const entries = Object.entries(allVotes);
-  const totalVotes = entries.length;
+  const totalVotes = entries.reduce(
+    (count, [, vote]) => count + (isClassification(vote) ? 1 : 0),
+    0,
+  );
+  const resultTotalVotes = entries.reduce(
+    (count, [, vote]) => count + (isResultVote(vote) ? 1 : 0),
+    0,
+  );
 
-  if (totalVotes === 0) {
-    return { classification: null, totalVotes: 0, voteCounts: {}, iqm: 0 };
+  if (totalVotes === 0 && resultTotalVotes === 0) {
+    return {
+      classification: null,
+      result: null,
+      winningCategory: null,
+      winningVote: null,
+      winningVotes: 0,
+      totalVotes: 0,
+      voteCounts: {},
+      iqm: 0,
+      resultTotalVotes: 0,
+      resultVoteCounts: {},
+    };
   }
 
   const voteCounts: Partial<Record<Classification, number>> = {};
+  const resultVoteCounts: Partial<Record<ResultVote, number>> = {};
   const weights: number[] = [];
 
-  for (const [, cls] of entries) {
-    const c = cls as Classification;
-    voteCounts[c] = (voteCounts[c] ?? 0) + 1;
-    const w = CLASSIFICATION_WEIGHT[c] ?? 0;
-    weights.push(w);
+  for (const [, vote] of entries) {
+    if (isClassification(vote)) {
+      voteCounts[vote] = (voteCounts[vote] ?? 0) + 1;
+      const w = CLASSIFICATION_WEIGHT[vote] ?? 0;
+      weights.push(w);
+      continue;
+    }
+
+    if (isResultVote(vote)) {
+      resultVoteCounts[vote] = (resultVoteCounts[vote] ?? 0) + 1;
+    }
   }
 
-  const iqm = interquartileMean(weights);
+  const iqm = totalVotes > 0 ? interquartileMean(weights) : 0;
 
   let classification: Classification | null = null;
   if (totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS) {
     classification = iqmToClassification(iqm, voteCounts, totalVotes);
   }
 
-  return { classification, totalVotes, voteCounts, iqm };
+  let result: ResultVote | null = null;
+  if (resultTotalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS) {
+    let winningResult: ResultVote | null = null;
+    let winningResultVotes = -1;
+    for (const option of RESULT_PICKER_OPTIONS) {
+      const count = resultVoteCounts[option] ?? 0;
+      if (count > winningResultVotes) {
+        winningResult = option;
+        winningResultVotes = count;
+      }
+    }
+    result = winningResult;
+  }
+
+  let winningCategory: BadgeConsensus["winningCategory"] = null;
+  let winningVote: BadgeConsensus["winningVote"] = null;
+  let winningVotes = 0;
+
+  if (classification) {
+    winningCategory = "classification";
+    winningVote = classification;
+    winningVotes = totalVotes;
+  }
+
+  if (result && resultTotalVotes > winningVotes) {
+    winningCategory = "result";
+    winningVote = result;
+    winningVotes = resultTotalVotes;
+  }
+
+  return {
+    classification,
+    result,
+    winningCategory,
+    winningVote,
+    winningVotes,
+    totalVotes,
+    voteCounts,
+    iqm,
+    resultTotalVotes,
+    resultVoteCounts,
+  };
 }

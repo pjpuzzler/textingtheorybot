@@ -5,8 +5,13 @@ import {
   PICKER_CLASSIFICATIONS,
   BADGE_INFO,
   BADGE_HINTS,
+  RESULT_INFO,
+  RESULT_HINTS,
+  RESULT_PICKER_OPTIONS,
+  isResultVote,
   MAX_VOTE_POST_IMAGES,
   MAX_ANNOTATED_POST_IMAGES,
+  type BadgeVoteOption,
   type InitResponse,
   type CreatePostRequest,
   type CreatePostResponse,
@@ -16,6 +21,11 @@ import {
   type PostMode,
   type EloSide,
 } from "../shared/api.ts";
+
+const ANNOTATED_PICKER_OPTIONS: BadgeVoteOption[] = [
+  ...PICKER_CLASSIFICATIONS,
+  ...RESULT_PICKER_OPTIONS,
+];
 
 type RedactionPoint = {
   x: number;
@@ -2356,18 +2366,22 @@ function isBookValid(p: BadgePlacement): boolean {
 }
 
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
-  pickerTitle.textContent = "Choose Classification (Best → Worst)";
+  pickerTitle.textContent = mode === "annotated"
+    ? "Choose Badge"
+    : "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   suppressEditorPickerUntil = Date.now() + 120;
   suppressEditorPickerBackdropUntil =
     Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
-  grid.className = "pk-grid";
+  grid.className = mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
 
   const bookValid = isBookValid(p);
 
-  for (const cls of PICKER_CLASSIFICATIONS) {
+  for (const cls of mode === "annotated"
+    ? ANNOTATED_PICKER_OPTIONS
+    : PICKER_CLASSIFICATIONS) {
     const isBookDisabled =
       mode === "vote" && cls === Classification.BOOK && !bookValid;
     const item = createPickerItem(cls, p, isBookDisabled, isNew);
@@ -2379,13 +2393,13 @@ function openClassPicker(p: BadgePlacement, isNew: boolean) {
 }
 
 function createPickerItem(
-  cls: Classification,
+  cls: BadgeVoteOption,
   p: BadgePlacement,
   disabled: boolean,
   isNew: boolean,
 ) {
-  const info = BADGE_INFO[cls];
-  const hint = BADGE_HINTS[cls];
+  const info = isResultVote(cls) ? RESULT_INFO[cls] : BADGE_INFO[cls];
+  const hint = isResultVote(cls) ? RESULT_HINTS[cls] : BADGE_HINTS[cls];
   const item = document.createElement("div");
   item.className = "pk-item";
   if (p.classification === cls) item.classList.add("active");

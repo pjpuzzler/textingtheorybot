@@ -885,6 +885,11 @@ html.tt-edit-boot #overlay-submit {
   gap: 6px;
 }
 
+.pk-grid--annotated {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 6px;
+}
+
 .pk-item {
   display: flex;
   flex-direction: column;

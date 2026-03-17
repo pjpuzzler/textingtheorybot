@@ -37,6 +37,17 @@ export const Classification = {
 export type Classification =
   (typeof Classification)[keyof typeof Classification];
 
+export const ResultVote = {
+  ABANDON: "Abandon",
+  CHECKMATED: "Checkmated",
+  DRAW: "Draw",
+  RESIGN: "Resign",
+  TIMEOUT: "Timeout",
+} as const;
+
+export type ResultVote = (typeof ResultVote)[keyof typeof ResultVote];
+export type BadgeVoteOption = Classification | ResultVote;
+
 /** Picker order best→worst (all votable classifications) */
 export const PICKER_CLASSIFICATIONS: Classification[] = [
   Classification.BRILLIANT,
@@ -50,6 +61,14 @@ export const PICKER_CLASSIFICATIONS: Classification[] = [
   Classification.MISTAKE,
   Classification.MISS,
   Classification.BLUNDER,
+];
+
+export const RESULT_PICKER_OPTIONS: ResultVote[] = [
+  ResultVote.ABANDON,
+  ResultVote.CHECKMATED,
+  ResultVote.DRAW,
+  ResultVote.RESIGN,
+  ResultVote.TIMEOUT,
 ];
 
 // No results section — removed Forced, Abandon, Checkmated, Draw, Resign, Timeout, Winner
@@ -116,12 +135,42 @@ export const BADGE_INFO: Record<
 /** Hints — special classifications */
 export const BADGE_HINTS: Partial<Record<Classification, string>> = {
   [Classification.BOOK]:
-    "A standard opening message or typical response(s) that follow.",
+    "A standard opening message or a typical response(s) that follows.",
   [Classification.FORCED]:
     "The only message that can realistically be sent in this position.",
   [Classification.MISS]:
     "Missed an obvious opportunity, cue, or context in the conversation.",
 };
+
+export const RESULT_INFO: Record<ResultVote, { label: string }> = {
+  [ResultVote.ABANDON]: { label: "Abandon" },
+  [ResultVote.CHECKMATED]: { label: "Checkmated" },
+  [ResultVote.DRAW]: { label: "Draw" },
+  [ResultVote.RESIGN]: { label: "Resign" },
+  [ResultVote.TIMEOUT]: { label: "Timeout" },
+};
+
+export const RESULT_HINTS: Record<ResultVote, string> = {
+  [ResultVote.ABANDON]: "One side abruptly bails on the conversation.",
+  [ResultVote.CHECKMATED]:
+    "A 'win' is secured (e.g., contact info given, a date agreed to, etc.).",
+  [ResultVote.DRAW]: "The conversation ends amicably, albeit short of a 'win'.",
+  [ResultVote.RESIGN]: "One side gives up and ends the interaction.",
+  [ResultVote.TIMEOUT]:
+    "The conversation dies as a result of waiting too long.",
+};
+
+export function isClassification(value: string): value is Classification {
+  return Object.values(Classification).includes(value as Classification);
+}
+
+export function isResultVote(value: string): value is ResultVote {
+  return Object.values(ResultVote).includes(value as ResultVote);
+}
+
+export function isBadgeVoteOption(value: string): value is BadgeVoteOption {
+  return isClassification(value) || isResultVote(value);
+}
 
 // --- ELO ---
 
@@ -145,7 +194,7 @@ export type BadgePlacement = {
   y: number; // percentage 0-100
   radius: number; // percentage of image width
   order?: number; // 0-indexed sequential
-  classification?: Classification; // only for self-annotated
+  classification?: BadgeVoteOption; // only for self-annotated
 };
 
 export type PostMode = "vote" | "annotated";
@@ -172,9 +221,15 @@ export type PostData = {
 
 export type BadgeConsensus = {
   classification: Classification | null;
+  result: ResultVote | null;
+  winningCategory: "classification" | "result" | null;
+  winningVote: BadgeVoteOption | null;
+  winningVotes: number;
   totalVotes: number;
   voteCounts: Partial<Record<Classification, number>>;
   iqm: number;
+  resultTotalVotes: number;
+  resultVoteCounts: Partial<Record<ResultVote, number>>;
 };
 
 export type InitResponse = {
@@ -185,7 +240,7 @@ export type InitResponse = {
   isModerator: boolean;
   postData: PostData | null;
   consensus: Record<string, BadgeConsensus>;
-  userVotes: Record<string, Classification>;
+  userVotes: Record<string, BadgeVoteOption>;
   userElo: number | null;
   consensusElo: number | null;
   eloVoteCount: number;
@@ -229,7 +284,7 @@ export type UpdatePostResponse = {
 
 export type VoteBadgeRequest = {
   badgeId: string;
-  classification: Classification;
+  classification: BadgeVoteOption;
 };
 
 export type VoteBadgeResponse = {
@@ -270,7 +325,6 @@ export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];
 
 // --- Consensus helpers ---
 
-export const BOOK_MISS_IQM_MAJORITY = 0.5;
 export const INTERESTING_LOWER_BOUND: Classification = Classification.MISTAKE;
 export const INTERESTING_UPPER_BOUND: Classification = Classification.BEST;
 
@@ -318,20 +372,20 @@ export function iqmToClassification(
   if (iqmTotalVotes > 0) {
     const bookIqmShare =
       (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
-    if (bookIqmShare > BOOK_MISS_IQM_MAJORITY) {
+    if (bookIqmShare > 0.5 && 0.25 > iqm && iqm >= -0.25) {
       return Classification.BOOK;
     }
 
     const forcedIqmShare =
       (iqmVoteMass.byClassification[Classification.FORCED] ?? 0) /
       iqmTotalVotes;
-    if (forcedIqmShare > BOOK_MISS_IQM_MAJORITY) {
+    if (forcedIqmShare > 0.5 && 0.25 > iqm && iqm >= -0.25) {
       return Classification.FORCED;
     }
 
     const missIqmShare =
       (iqmVoteMass.byClassification[Classification.MISS] ?? 0) / iqmTotalVotes;
-    if (missIqmShare > BOOK_MISS_IQM_MAJORITY) {
+    if (missIqmShare > 0.5 && -0.75 > iqm && iqm >= -1.5) {
       return Classification.MISS;
     }
   }

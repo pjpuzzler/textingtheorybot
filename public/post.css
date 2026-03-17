@@ -748,10 +748,19 @@ body {
   margin-bottom: 10px;
 }
 
+.picker-title--section {
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
 .pk-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
+}
+
+.pk-grid--results {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .pk-item {
@@ -759,6 +768,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   cursor: pointer;
   padding: 6px 2px;
   border-radius: 8px;
@@ -828,6 +838,36 @@ body {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pk-grid--results .pk-item {
+  gap: 3px;
+  padding: 4px 1px;
+}
+
+.pk-grid--results .pk-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.pk-grid--results .pk-label {
+  font-size: 9px;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 430px) {
+  .pk-grid--results {
+    gap: 4px;
+  }
+
+  .pk-grid--results .pk-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .pk-grid--results .pk-label {
+    font-size: 8px;
+  }
 }
 
 .pk-hint-btn {

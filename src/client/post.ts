@@ -3,6 +3,10 @@ import {
   ApiEndpoint,
   BADGE_INFO,
   BADGE_HINTS,
+  RESULT_HINTS,
+  RESULT_INFO,
+  RESULT_PICKER_OPTIONS,
+  isResultVote,
   Classification,
   getEloColor,
   MIN_VOTES_FOR_BADGE_CONSENSUS,
@@ -10,6 +14,7 @@ import {
   MIN_ELO,
   MAX_ELO,
   type InitResponse,
+  type BadgeVoteOption,
   type BadgeConsensus,
   type BadgePlacement,
   type PostData,
@@ -17,8 +22,9 @@ import {
 
 let postData: PostData | null = null;
 let consensus: Record<string, BadgeConsensus> = {};
-let userVotes: Record<string, Classification> = {};
+let userVotes: Record<string, BadgeVoteOption> = {};
 const localVoteGraceUntil: Record<string, number> = {};
+const recentVoteAnimationUntil: Record<string, number> = {};
 let userElo: number | null = null;
 let lastSubmittedElo: number | null = null;
 let activeImageIndex = 0;
@@ -61,6 +67,8 @@ const UNVOTED_RING_WIDTH_PX = 2;
 const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
 const PICKER_ITEM_CLICK_FALLBACK_GUARD_MS = 500;
 const PICKER_CLOSE_GUARD_AFTER_OPEN_MS = 180;
+const RECENT_VOTE_ANIMATION_MS = 900;
+const REFRESH_AFTER_VOTE_GUARD_MS = 1400;
 let lastPickerOpenAt = 0;
 let lastPickerItemVoteAt = 0;
 let suppressPickerReopenUntil = 0;
@@ -90,6 +98,7 @@ let eloPointerValue: number | null = null;
 let swipeTransformRaf: number | null = null;
 let pendingActiveSwipeDx = 0;
 let pendingPreviewSwipeDx: number | null = null;
+let suppressRefreshUntil = 0;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -649,8 +658,8 @@ function schedulePostLayoutRefresh(): void {
   });
 }
 
-function badgeAsset(cls: Classification): string {
-  return `/assets/badges/${cls.toLowerCase()}.png`;
+function badgeAsset(vote: BadgeVoteOption): string {
+  return `/assets/badges/${vote.toLowerCase()}.png`;
 }
 
 function unknownBadgeAsset(): string {
@@ -680,6 +689,89 @@ function getPickerClassifications(bookValid: boolean): Classification[] {
   ];
 }
 
+function getSortedPlacements(): BadgePlacement[] {
+  return (postData?.images ?? [])
+    .flatMap((image) => image.placements)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function isResultVoteAvailableForBadge(p: BadgePlacement): boolean {
+  const sorted = getSortedPlacements();
+  if (sorted.length <= 1) return false;
+  const lastPlacement = sorted[sorted.length - 1];
+  return lastPlacement?.id === p.id;
+}
+
+function getVoteOptionInfo(vote: BadgeVoteOption): { label: string } {
+  return isResultVote(vote) ? RESULT_INFO[vote] : BADGE_INFO[vote];
+}
+
+function getVoteOptionHint(vote: BadgeVoteOption): string | undefined {
+  return isResultVote(vote) ? RESULT_HINTS[vote] : BADGE_HINTS[vote];
+}
+
+function playRecentVoteAnimation(
+  faceEl: HTMLDivElement | null,
+  voteEl: HTMLDivElement | null,
+): void {
+  if (faceEl) {
+    faceEl.style.transition = "none";
+    faceEl.style.transform = "scale(0.92)";
+    faceEl.style.opacity = "0.82";
+    void faceEl.offsetWidth;
+    requestAnimationFrame(() => {
+      faceEl.style.transition =
+        "transform 340ms cubic-bezier(0.2, 0.9, 0.2, 1), opacity 340ms cubic-bezier(0.2, 0.9, 0.2, 1)";
+      faceEl.style.transform = "scale(1)";
+      faceEl.style.opacity = "1";
+      window.setTimeout(() => {
+        faceEl.style.transition = "";
+        faceEl.style.transform = "";
+        faceEl.style.opacity = "";
+      }, 380);
+    });
+  }
+
+  if (voteEl) {
+    voteEl.style.transition = "none";
+    voteEl.style.transform = "translate(12%, 12%) scale(0.56)";
+    voteEl.style.opacity = "0.35";
+    void voteEl.offsetWidth;
+    requestAnimationFrame(() => {
+      voteEl.style.transition =
+        "transform 420ms cubic-bezier(0.2, 0.9, 0.2, 1), opacity 420ms cubic-bezier(0.2, 0.9, 0.2, 1)";
+      voteEl.style.transform = "translate(12%, 12%) scale(1)";
+      voteEl.style.opacity = "1";
+      window.setTimeout(() => {
+        voteEl.style.transition = "";
+        voteEl.style.transform = "translate(12%, 12%)";
+        voteEl.style.opacity = "";
+      }, 460);
+    });
+  }
+}
+
+function scheduleRecentVoteAnimation(badgeId: string): void {
+  if ((recentVoteAnimationUntil[badgeId] ?? 0) <= Date.now()) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if ((recentVoteAnimationUntil[badgeId] ?? 0) <= Date.now()) return;
+      const badgeEl = badgesEl.querySelector(
+        `.badge[data-badge-id="${badgeId}"]`,
+      ) as HTMLDivElement | null;
+      if (!badgeEl) return;
+      const faceEl = badgeEl.querySelector(
+        ".badge-face",
+      ) as HTMLDivElement | null;
+      const voteEl = badgeEl.querySelector(
+        ".badge-vote",
+      ) as HTMLDivElement | null;
+      playRecentVoteAnimation(faceEl, voteEl);
+    });
+  });
+}
+
 function applyBadgeVisibility(): void {
   badgesEl.classList.toggle("is-hidden", !badgesVisible);
   badgeVisToggleBtn.classList.toggle("is-off", !badgesVisible);
@@ -699,8 +791,8 @@ function buildBadgeLayoutKey(image: PostData["images"][number]): string {
     .map((placement) => {
       const c = consensus[placement.id];
       const vote = userVotes[placement.id] ?? "";
-      const consensusCls = c?.classification ?? "";
-      const consensusTotal = c?.totalVotes ?? 0;
+      const consensusVote = c?.winningVote ?? "";
+      const consensusTotal = c?.winningVotes ?? 0;
       return [
         placement.id,
         placement.x,
@@ -708,8 +800,9 @@ function buildBadgeLayoutKey(image: PostData["images"][number]): string {
         placement.radius,
         placement.classification ?? "",
         vote,
-        consensusCls,
+        consensusVote,
         consensusTotal,
+        c?.winningCategory ?? "",
       ].join(":");
     })
     .join("|");
@@ -1134,19 +1227,21 @@ async function refreshPostState() {
   if (!postData || document.hidden) return;
   if (pickerOvl.classList.contains("open")) return;
   if (Date.now() - lastUserInteractionAt < 900) return;
+  if (Date.now() < suppressRefreshUntil) return;
   try {
     const currentImageUrl = currentImage()?.imageUrl ?? null;
     const res = await fetch(ApiEndpoint.Init);
     if (!res.ok) return;
     const data = (await res.json()) as InitResponse;
     if (!data.postData) return;
+    if (Date.now() < suppressRefreshUntil) return;
 
     postData = normalizePostData(data.postData);
     currentPostId = data.postId;
     viewerOwnsPost = !!data.isOwnPost;
     consensus = data.consensus;
     const now = Date.now();
-    const nextVotes: Record<string, Classification> = { ...data.userVotes };
+    const nextVotes: Record<string, BadgeVoteOption> = { ...data.userVotes };
     for (const [badgeId, cls] of Object.entries(userVotes)) {
       const graceUntil = localVoteGraceUntil[badgeId] ?? 0;
       if (!nextVotes[badgeId] && now < graceUntil) {
@@ -1486,6 +1581,12 @@ function layoutBadges(force = false) {
   badgesEl.style.height = `${r.h}px`;
   applyBadgeVisibility();
   renderBadgesInto(badgesEl, image, scaleBase, true);
+
+  for (const placement of image.placements) {
+    if ((recentVoteAnimationUntil[placement.id] ?? 0) > Date.now()) {
+      scheduleRecentVoteAnimation(placement.id);
+    }
+  }
 }
 
 function renderBadgesInto(
@@ -1512,12 +1613,16 @@ function renderBadgesInto(
 
     const c = consensus[p.id];
     const uv = userVotes[p.id];
+    const consensusVote = c?.winningVote ?? null;
     const hasConsensus =
-      !!c?.classification && c.totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS;
+      !!consensusVote &&
+      (c?.winningVotes ?? 0) >= MIN_VOTES_FOR_BADGE_CONSENSUS;
     const isLiveVoteWindow = pd.mode === "vote" && isVotingWindowOpen();
     const opensExpandedOnTap =
       !isExpandedView && !(pd.mode === "vote" && canVoteOnCurrentPost());
     let badgeImageUrl: string | null = null;
+    let faceEl: HTMLDivElement | null = null;
+    let voteEl: HTMLDivElement | null = null;
 
     if (opensExpandedOnTap) {
       el.classList.add("badge--passive");
@@ -1529,14 +1634,14 @@ function renderBadgesInto(
     } else {
       if (hasConsensus) {
         el.classList.add("badge--voted");
-        badgeImageUrl = badgeAsset(c!.classification!);
+        badgeImageUrl = badgeAsset(consensusVote!);
       } else {
         el.classList.add("badge--placeholder");
         badgeImageUrl = unknownBadgeAsset();
       }
 
       if (badgeImageUrl) {
-        const faceEl = document.createElement("div");
+        faceEl = document.createElement("div");
         faceEl.className = "badge-face";
         if (isLiveVoteWindow) {
           faceEl.classList.add("badge-face--unlocked");
@@ -1559,9 +1664,9 @@ function renderBadgesInto(
         }
 
         if (uv && !isOwnPost() && canVoteOnCurrentPost()) {
-          const voteEl = document.createElement("div");
+          voteEl = document.createElement("div");
           voteEl.className = "badge-vote";
-          const voteSz = Math.max(12, sizePx * 0.42);
+          const voteSz = sizePx * 0.42;
           voteEl.style.width = `${voteSz}px`;
           voteEl.style.height = `${voteSz}px`;
           voteEl.style.backgroundImage = `url(${badgeAsset(uv)})`;
@@ -1616,10 +1721,7 @@ if (typeof ResizeObserver !== "undefined") {
 let activeHintEl: HTMLDivElement | null = null;
 
 function isBookValidForVote(p: BadgePlacement): boolean {
-  const sorted = (postData?.images ?? [])
-    .flatMap((image) => image.placements)
-    .slice()
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const sorted = getSortedPlacements();
   const idx = sorted.findIndex((b) => b.id === p.id);
   if (idx === 0) return true;
   const prev = sorted[idx - 1];
@@ -1634,10 +1736,27 @@ function openPicker(p: BadgePlacement) {
   suppressCanvasExpandUntil = Date.now() + 900;
   lastPickerOpenAt = Date.now();
   const currentVote = userVotes[p.id];
+  const resultVoteAvailable = isResultVoteAvailableForBadge(p);
 
-  pickerTitle.textContent = "Vote for Classification (Best → Worst)";
+  pickerTitle.textContent = resultVoteAvailable
+    ? "Vote for Result (If the match is over)"
+    : "Vote for Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   activeHintEl = null;
+
+  if (resultVoteAvailable) {
+    const resultGrid = document.createElement("div");
+    resultGrid.className = "pk-grid pk-grid--results";
+    for (const result of RESULT_PICKER_OPTIONS) {
+      resultGrid.appendChild(createPickerItem(result, currentVote, p, false));
+    }
+    pickerBody.appendChild(resultGrid);
+
+    const classificationTitle = document.createElement("div");
+    classificationTitle.className = "picker-title picker-title--section";
+    classificationTitle.textContent = "Vote for Classification (Best → Worst)";
+    pickerBody.appendChild(classificationTitle);
+  }
 
   const grid = document.createElement("div");
   grid.className = "pk-grid";
@@ -1650,17 +1769,18 @@ function openPicker(p: BadgePlacement) {
   }
 
   pickerBody.appendChild(grid);
+
   pickerOvl.classList.add("open");
 }
 
 function createPickerItem(
-  cls: Classification,
-  currentVote: Classification | undefined,
+  cls: BadgeVoteOption,
+  currentVote: BadgeVoteOption | undefined,
   p: BadgePlacement,
   disabled: boolean,
 ) {
-  const info = BADGE_INFO[cls];
-  const hint = BADGE_HINTS[cls];
+  const info = getVoteOptionInfo(cls);
+  const hint = getVoteOptionHint(cls);
   const item = document.createElement("div");
   item.className = "pk-item";
   if (currentVote === cls) item.classList.add("active");
@@ -1842,12 +1962,14 @@ document.addEventListener("pointerdown", (event) => {
   closePicker();
 });
 
-async function voteBadge(p: BadgePlacement, cls: Classification) {
+async function voteBadge(p: BadgePlacement, cls: BadgeVoteOption) {
   if (postData && postData.creatorId === viewerUserId) {
     return;
   }
 
   const previousVote = userVotes[p.id];
+  suppressRefreshUntil = Date.now() + REFRESH_AFTER_VOTE_GUARD_MS;
+  recentVoteAnimationUntil[p.id] = Date.now() + RECENT_VOTE_ANIMATION_MS;
   suppressPickerReopenUntil = Date.now() + 500;
   suppressCanvasExpandUntil = Date.now() + 320;
   suppressCanvasClickUntil = Date.now() + 320;
@@ -1879,6 +2001,7 @@ async function voteBadge(p: BadgePlacement, cls: Classification) {
     for (const invalidId of data.invalidatedBadgeIds ?? []) {
       delete userVotes[invalidId];
       delete localVoteGraceUntil[invalidId];
+      delete recentVoteAnimationUntil[invalidId];
     }
 
     if (userVotes[p.id] === cls) {
