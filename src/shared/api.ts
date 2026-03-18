@@ -4,7 +4,7 @@
 
 // --- Tuning constants (single source of truth) ---
 
-export const MIN_VOTES_FOR_BADGE_CONSENSUS = 10;
+export const MIN_VOTES_FOR_BADGE_CONSENSUS = 25;
 export const MIN_VOTES_FOR_POST_FLAIR = 1;
 export const MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR: number = 25;
 export const MIN_VOTES_FOR_USER_FLAIR: number =
@@ -13,7 +13,7 @@ export const MAX_POST_AGE_TO_VOTE_MS: number = 24 * 60 * 60 * 1000;
 
 export const MIN_ELO = 100;
 export const MAX_ELO = 3000;
-export const MAX_VOTE_POST_IMAGES: number = 3;
+export const MAX_VOTE_POST_IMAGES: number = 5;
 export const MAX_ANNOTATED_POST_IMAGES: number = 1;
 export const MAX_POST_IMAGES: number = MAX_VOTE_POST_IMAGES;
 
@@ -137,7 +137,7 @@ export const BADGE_HINTS: Partial<Record<Classification, string>> = {
   [Classification.BOOK]:
     "A standard opening message or a typical response(s) that follows.",
   [Classification.FORCED]:
-    "The only message that can realistically be sent in this position.",
+    "The ONLY message that can realistically be sent in this position.",
   [Classification.MISS]:
     "Missed an obvious opportunity, cue, or context in the conversation.",
 };
@@ -379,13 +379,13 @@ export function iqmToClassification(
     const forcedIqmShare =
       (iqmVoteMass.byClassification[Classification.FORCED] ?? 0) /
       iqmTotalVotes;
-    if (forcedIqmShare > 0.5 && 0.25 > iqm && iqm >= -0.25) {
+    if (forcedIqmShare > 0.75 && 0.25 > iqm && iqm >= -0.25) {
       return Classification.FORCED;
     }
 
     const missIqmShare =
       (iqmVoteMass.byClassification[Classification.MISS] ?? 0) / iqmTotalVotes;
-    if (missIqmShare > 0.5 && -0.75 > iqm && iqm >= -1.5) {
+    if (missIqmShare > 0.5 && 0 > iqm) {
       return Classification.MISS;
     }
   }
