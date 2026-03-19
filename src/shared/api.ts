@@ -20,6 +20,7 @@ export const MAX_POST_IMAGES: number = MAX_VOTE_POST_IMAGES;
 // --- Classifications ---
 
 export const Classification = {
+  SUPERBRILLIANT: "Superbrilliant",
   BRILLIANT: "Brilliant",
   GREAT: "Great",
   BEST: "Best",
@@ -31,6 +32,7 @@ export const Classification = {
   MISTAKE: "Mistake",
   MISS: "Miss",
   BLUNDER: "Blunder",
+  MEGABLUNDER: "Megablunder",
   INTERESTING: "Interesting",
 } as const;
 
@@ -75,6 +77,7 @@ export const RESULT_PICKER_OPTIONS: ResultVote[] = [
 
 /** Weighted score for IQM calculation */
 export const CLASSIFICATION_WEIGHT: Record<Classification, number> = {
+  [Classification.SUPERBRILLIANT]: 3,
   [Classification.BRILLIANT]: 3,
   [Classification.GREAT]: 2,
   [Classification.BEST]: 1,
@@ -86,6 +89,7 @@ export const CLASSIFICATION_WEIGHT: Record<Classification, number> = {
   [Classification.MISTAKE]: -1,
   [Classification.MISS]: -1,
   [Classification.BLUNDER]: -2,
+  [Classification.MEGABLUNDER]: -2,
   [Classification.INTERESTING]: 0,
 };
 
@@ -94,6 +98,11 @@ export const BADGE_INFO: Record<
   Classification,
   { symbol: string; color: string; label: string }
 > = {
+  [Classification.SUPERBRILLIANT]: {
+    symbol: "!!!",
+    color: "#722f2c",
+    label: "Superbrilliant",
+  },
   [Classification.BRILLIANT]: {
     symbol: "!!",
     color: "#26c2a3",
@@ -124,6 +133,11 @@ export const BADGE_INFO: Record<
     symbol: "??",
     color: "#fa412d",
     label: "Blunder",
+  },
+  [Classification.MEGABLUNDER]: {
+    symbol: "???",
+    color: "#7d1811",
+    label: "Megablunder",
   },
   [Classification.INTERESTING]: {
     symbol: "!?",
@@ -372,25 +386,26 @@ export function iqmToClassification(
   if (iqmTotalVotes > 0) {
     const bookIqmShare =
       (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
-    if (bookIqmShare > 0.5 && 0.25 > iqm && iqm >= -0.25) {
+    if (bookIqmShare > 0.5 && -0.25 <= iqm && iqm < 0.25) {
       return Classification.BOOK;
     }
 
     const forcedIqmShare =
       (iqmVoteMass.byClassification[Classification.FORCED] ?? 0) /
       iqmTotalVotes;
-    if (forcedIqmShare > 0.75 && 0.25 > iqm && iqm >= -0.25) {
+    if (forcedIqmShare > 0.75 && -0.25 <= iqm && iqm < 0.25) {
       return Classification.FORCED;
     }
 
     const missIqmShare =
       (iqmVoteMass.byClassification[Classification.MISS] ?? 0) / iqmTotalVotes;
-    if (missIqmShare > 0.5 && 0 > iqm) {
+    if (missIqmShare > 0.5 && iqm < 0) {
       return Classification.MISS;
     }
   }
 
   // Standard mapping
+  if (iqm >= 2.75) return Classification.SUPERBRILLIANT;
   if (iqm >= 2.5) return Classification.BRILLIANT;
   if (iqm >= 1.5) return Classification.GREAT;
   if (iqm >= 0.75) return Classification.BEST;
@@ -398,7 +413,8 @@ export function iqmToClassification(
   if (iqm >= -0.25) return Classification.GOOD;
   if (iqm >= -0.75) return Classification.INACCURACY;
   if (iqm >= -1.5) return Classification.MISTAKE;
-  return Classification.BLUNDER;
+  if (iqm >= -1.75) return Classification.BLUNDER;
+  return Classification.MEGABLUNDER;
 }
 
 function interquartileVoteMassByClassification(

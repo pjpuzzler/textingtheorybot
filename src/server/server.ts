@@ -85,11 +85,11 @@ const PICKER_VOTE_SET = new Set<BadgeVoteOption>([
 ]);
 
 const COMMENT_REPLY_OPTIONS = [
-  // {
-  //   label: "Superbrilliant",
-  //   value: "Superbrilliant",
-  //   imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
-  // },
+  {
+    label: "Superbrilliant",
+    value: "Superbrilliant",
+    imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
+  },
   {
     label: "Brilliant",
     value: "Brilliant",
@@ -99,11 +99,6 @@ const COMMENT_REPLY_OPTIONS = [
     label: "Great",
     value: "Great",
     imageUrl: "https://i.redd.it/m42nhz1mnc5f1.png",
-  },
-  {
-    label: "Book",
-    value: "Book",
-    imageUrl: "https://i.redd.it/jp3hzd0mnc5f1.png",
   },
   {
     label: "Best",
@@ -119,6 +114,11 @@ const COMMENT_REPLY_OPTIONS = [
     label: "Good",
     value: "Good",
     imageUrl: "https://i.redd.it/8vmmw22mnc5f1.png",
+  },
+  {
+    label: "Book",
+    value: "Book",
+    imageUrl: "https://i.redd.it/jp3hzd0mnc5f1.png",
   },
   {
     label: "Inaccuracy",
@@ -140,11 +140,11 @@ const COMMENT_REPLY_OPTIONS = [
     value: "Blunder",
     imageUrl: "https://i.redd.it/p5dhke0mnc5f1.png",
   },
-  // {
-  //   label: "Megablunder",
-  //   value: "Megablunder",
-  //   imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
-  // },
+  {
+    label: "Megablunder",
+    value: "Megablunder",
+    imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
+  },
 ] as const;
 
 const COMMENT_REPLY_IMAGE_BY_VALUE = new Map(
