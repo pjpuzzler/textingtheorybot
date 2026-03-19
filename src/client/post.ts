@@ -967,7 +967,8 @@ function updateEloBubblePosition(): void {
   const min = Number(eloSlider.min) || MIN_ELO;
   const max = Number(eloSlider.max) || MAX_ELO;
   const value = Number(eloSlider.value);
-  const trackWidth = eloSlider.clientWidth || eloSlider.getBoundingClientRect().width;
+  const trackWidth =
+    eloSlider.clientWidth || eloSlider.getBoundingClientRect().width;
   if (trackWidth <= 0) return;
 
   const t = max > min ? (value - min) / (max - min) : 0;
@@ -988,10 +989,7 @@ function updateEloBubblePosition(): void {
   );
 
   eloBubble.style.left = `${clampedLeft}px`;
-  eloBubble.style.setProperty(
-    "--elo-bubble-arrow-offset",
-    `${arrowOffset}px`,
-  );
+  eloBubble.style.setProperty("--elo-bubble-arrow-offset", `${arrowOffset}px`);
 }
 
 function showEloBubble(active: boolean): void {
@@ -2566,12 +2564,8 @@ function stopEloTouchGesture(): void {
   eloTouchId = null;
 }
 
-function getTrackedEloTouch(
-  event: TouchEvent,
-): Touch | null {
-  const touches = event.touches.length
-    ? event.touches
-    : event.changedTouches;
+function getTrackedEloTouch(event: TouchEvent): Touch | null {
+  const touches = event.touches.length ? event.touches : event.changedTouches;
   for (let index = 0; index < touches.length; index += 1) {
     const touch = touches.item(index);
     if (!touch) continue;

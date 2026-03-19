@@ -583,14 +583,10 @@ body {
   overflow: visible;
   opacity: 0;
   pointer-events: none;
-  transition:
-    opacity 180ms ease,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 180ms ease;
   z-index: 3;
-  box-shadow:
-    0 10px 22px rgba(0, 0, 0, 0.22),
-    inset 0 -1px 0 var(--tt-panel);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22), inset 0 -1px 0 var(--tt-panel);
 }
 
 .elo-bubble::before,
