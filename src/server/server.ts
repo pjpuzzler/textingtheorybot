@@ -79,6 +79,8 @@ const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus-meta:v2:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const commentReplyTargetKey = (userId: string) =>
   `tt:comment-reply-target:v1:${userId}`;
+const userHasBadgeVoteKey = (userId: string) =>
+  `tt:user-has-badge-vote:v1:${userId}`;
 const PICKER_VOTE_SET = new Set<BadgeVoteOption>([
   ...PICKER_CLASSIFICATIONS,
   ...RESULT_PICKER_OPTIONS,
@@ -858,6 +860,7 @@ async function onInit(): Promise<InitResponse> {
       userId,
       isOwnPost: false,
       isModerator: false,
+      hasEverSubmittedBadgeVote: false,
       postData: null,
       consensus: {},
       userVotes: {},
@@ -875,12 +878,14 @@ async function onInit(): Promise<InitResponse> {
   let userElo: number | null = null;
   let consensusElo: number | null = null;
   let eloVoteCount = 0;
+  let hasEverSubmittedBadgeVote = false;
 
-  const [uvRaw, userEloRaw, allEloRaw, isModerator] = await Promise.all([
+  const [uvRaw, userEloRaw, allEloRaw, isModerator, hasBadgeVoteRaw] = await Promise.all([
     userId ? redis.hGetAll(userVotesKey(postId, userId)) : Promise.resolve({}),
     userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
     redis.get(eloVotesKey(postId)),
     userId ? isCurrentUserModerator() : Promise.resolve(false),
+    userId ? redis.get(userHasBadgeVoteKey(userId)) : Promise.resolve(null),
   ]);
 
   for (const [bid, cls] of Object.entries(uvRaw)) {
@@ -890,6 +895,7 @@ async function onInit(): Promise<InitResponse> {
   }
 
   if (userEloRaw) userElo = Number(userEloRaw);
+  hasEverSubmittedBadgeVote = hasBadgeVoteRaw === "1";
   if (allEloRaw) {
     const eloArr = JSON.parse(allEloRaw) as number[];
     eloVoteCount = eloArr.length;
@@ -942,6 +948,7 @@ async function onInit(): Promise<InitResponse> {
     userId,
     isOwnPost: !!userId && postData.creatorId === userId,
     isModerator,
+    hasEverSubmittedBadgeVote,
     postData,
     consensus,
     userVotes,
@@ -1228,9 +1235,12 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   const eligible = await isEligibleVoter(postData, userId);
 
   // Always store local user vote for UX, only count eligible votes toward consensus
-  await redis.hSet(userVotesKey(postId, userId), {
-    [body.badgeId]: body.classification,
-  });
+  await Promise.all([
+    redis.hSet(userVotesKey(postId, userId), {
+      [body.badgeId]: body.classification,
+    }),
+    redis.set(userHasBadgeVoteKey(userId), "1"),
+  ]);
   if (eligible) {
     await redis.hSet(votesKey(postId, body.badgeId), {
       [userId]: body.classification,

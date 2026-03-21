@@ -33,6 +33,7 @@ let viewerOwnsPost = false;
 let viewerUserId = "";
 let viewerIsLoggedIn = false;
 let viewerIsModerator = false;
+let hasEverSubmittedBadgeVote = false;
 let refreshTimer: number | null = null;
 let voteLockCountdownTimer: number | null = null;
 let imageLoadToken = 0;
@@ -56,7 +57,6 @@ let loadingIndicatorTimer: number | null = null;
 let loadingIndicatorShownAt = 0;
 let loadingIndicatorHideTimer: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 210;
-const LOADING_INDICATOR_DELAY_MS = 90;
 const LOADING_INDICATOR_MIN_VISIBLE_MS = 140;
 const SWIPE_COMMIT_MIN_PX = 48;
 const SWIPE_COMMIT_RATIO = 0.16;
@@ -105,6 +105,17 @@ let pendingActiveSwipeDx = 0;
 let pendingPreviewSwipeDx: number | null = null;
 let suppressRefreshUntil = 0;
 
+type StoredVoteSnapshot = {
+  updatedAt: number;
+  votes: Record<
+    string,
+    {
+      vote: BadgeVoteOption;
+      graceUntil: number;
+    }
+  >;
+};
+
 const $ = (id: string) => document.getElementById(id)!;
 
 const loadingEl = $("loading") as HTMLDivElement;
@@ -134,6 +145,7 @@ const eloBtn = $("elo-btn") as HTMLButtonElement;
 const eloGmTick = $("elo-gm-tick") as HTMLDivElement;
 const createPrompt = $("create-prompt") as HTMLDivElement;
 const createBtn = $("create-btn") as HTMLButtonElement;
+const voteHintEl = $("vote-hint") as HTMLDivElement;
 
 const pickerOvl = $("picker-overlay") as HTMLDivElement;
 const pickerBg = $("picker-bg") as HTMLDivElement;
@@ -152,6 +164,75 @@ if (isAndroidLike()) {
 
 function pageStateStorageKey(): string | null {
   return currentPostId ? `tt:page:${currentPostId}` : null;
+}
+
+function voteStateStorageKey(): string | null {
+  return currentPostId ? `tt:votes:${currentPostId}` : null;
+}
+
+function readStoredVoteSnapshot(): StoredVoteSnapshot | null {
+  const key = voteStateStorageKey();
+  if (!key) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredVoteSnapshot;
+    if (!parsed || typeof parsed !== "object" || !parsed.votes) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistLocalVoteState(): void {
+  const key = voteStateStorageKey();
+  if (!key) return;
+  try {
+    const now = Date.now();
+    const votes: StoredVoteSnapshot["votes"] = {};
+    for (const [badgeId, graceUntil] of Object.entries(localVoteGraceUntil)) {
+      const vote = userVotes[badgeId];
+      if (!vote || graceUntil <= now) continue;
+      votes[badgeId] = { vote, graceUntil };
+    }
+    if (!Object.keys(votes).length) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    const snapshot: StoredVoteSnapshot = {
+      updatedAt: now,
+      votes,
+    };
+    window.localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    // ignore storage issues in embedded views
+  }
+}
+
+function syncVotesFromStorage(): boolean {
+  const snapshot = readStoredVoteSnapshot();
+  if (!snapshot) return false;
+  const now = Date.now();
+  let changed = false;
+  let hasActiveStoredVote = false;
+  for (const [badgeId, stored] of Object.entries(snapshot.votes)) {
+    if (!stored || typeof stored.graceUntil !== "number") continue;
+    if (stored.graceUntil <= now) continue;
+    hasActiveStoredVote = true;
+    if (userVotes[badgeId] !== stored.vote) {
+      userVotes[badgeId] = stored.vote;
+      changed = true;
+    }
+    if ((localVoteGraceUntil[badgeId] ?? 0) < stored.graceUntil) {
+      localVoteGraceUntil[badgeId] = stored.graceUntil;
+    }
+  }
+  if (!hasActiveStoredVote) {
+    persistLocalVoteState();
+  }
+  return changed;
 }
 
 function readStoredImageIndex(totalImages: number): number | null {
@@ -547,32 +628,62 @@ function syncActiveImageIndexFromStorage(): void {
   applyImageIndexImmediately(nextIndex);
 }
 
+function syncTransientStateFromStorage(): void {
+  if (!postData) return;
+  const imageIndexBefore = activeImageIndex;
+  syncActiveImageIndexFromStorage();
+  const votesChanged = syncVotesFromStorage();
+  if (votesChanged || imageIndexBefore !== activeImageIndex) {
+    layoutBadges(true);
+  }
+}
+
 function resetPostTransientOverlays(): void {
   pickerOvl.classList.remove("open");
+  voteHintEl.classList.add("hidden");
+}
+
+function shouldShowVoteHint(): boolean {
+  return isExpandedView && canVoteOnCurrentPost() && !hasEverSubmittedBadgeVote;
+}
+
+function openVoteHint(): void {
+  if (!shouldShowVoteHint()) return;
+  voteHintEl.classList.remove("hidden");
+}
+
+function closeVoteHint(): void {
+  voteHintEl.classList.add("hidden");
 }
 
 resetPostTransientOverlays();
 window.addEventListener("pageshow", () => {
   resetPostTransientOverlays();
-  syncActiveImageIndexFromStorage();
+  syncTransientStateFromStorage();
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && isExpandedView) {
     writeActiveImageIndexToStorage();
+    persistLocalVoteState();
   }
   if (document.visibilityState === "visible") {
     resetPostTransientOverlays();
-    syncActiveImageIndexFromStorage();
+    syncTransientStateFromStorage();
   }
 });
 window.addEventListener("focus", () => {
   resetPostTransientOverlays();
-  syncActiveImageIndexFromStorage();
+  syncTransientStateFromStorage();
 });
 window.addEventListener("pagehide", () => {
   if (isExpandedView) {
     writeActiveImageIndexToStorage();
+    persistLocalVoteState();
   }
+});
+window.addEventListener("storage", (event) => {
+  if (event.key !== voteStateStorageKey()) return;
+  syncTransientStateFromStorage();
 });
 
 async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
@@ -588,11 +699,9 @@ async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
 function startLoadingIndicator(): void {
   stopLoadingIndicator();
   loadingEl.style.display = "flex";
-  loadingIndicatorTimer = window.setTimeout(() => {
-    loadingIndicatorTimer = null;
-    loadingIndicatorShownAt = Date.now();
-    loadingEl.classList.add("is-visible");
-  }, LOADING_INDICATOR_DELAY_MS);
+  loadingIndicatorTimer = null;
+  loadingIndicatorShownAt = Date.now();
+  loadingEl.classList.add("is-visible");
 }
 
 function stopLoadingIndicator(): void {
@@ -758,11 +867,27 @@ function playRecentVoteAnimation(
   }
 }
 
+function playBadgeTapAnimation(badgeEl: HTMLDivElement): void {
+  badgeEl.style.transition = "none";
+  badgeEl.style.transform = "translate(-50%, -50%) scale(0.93)";
+  void badgeEl.offsetWidth;
+  requestAnimationFrame(() => {
+    badgeEl.style.transition =
+      "transform 170ms cubic-bezier(0.2, 0.9, 0.2, 1)";
+    badgeEl.style.transform = "translate(-50%, -50%) scale(1)";
+    window.setTimeout(() => {
+      badgeEl.style.transition = "";
+      badgeEl.style.transform = "translate(-50%, -50%)";
+    }, 210);
+  });
+}
+
 function scheduleRecentVoteAnimation(badgeId: string): void {
-  if ((recentVoteAnimationUntil[badgeId] ?? 0) <= Date.now()) return;
+  const animationToken = recentVoteAnimationUntil[badgeId] ?? 0;
+  if (animationToken <= Date.now()) return;
+  delete recentVoteAnimationUntil[badgeId];
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if ((recentVoteAnimationUntil[badgeId] ?? 0) <= Date.now()) return;
       const badgeEl = badgesEl.querySelector(
         `.badge[data-badge-id="${badgeId}"]`,
       ) as HTMLDivElement | null;
@@ -1213,11 +1338,13 @@ async function init() {
     viewerOwnsPost = !!data.isOwnPost;
     consensus = data.consensus;
     userVotes = data.userVotes;
+    syncVotesFromStorage();
     userElo = data.userElo;
     lastSubmittedElo = userElo;
     viewerUserId = data.userId;
     viewerIsLoggedIn = !!data.userId;
     viewerIsModerator = !!data.isModerator;
+    hasEverSubmittedBadgeVote = !!data.hasEverSubmittedBadgeVote;
 
     if (!postData) {
       postEl.classList.remove("is-ready");
@@ -1282,6 +1409,11 @@ async function init() {
     loadCurrentImage(false);
     updateVoteFooter(true);
     completeInitialPostReveal();
+    if (shouldShowVoteHint()) {
+      window.setTimeout(() => {
+        if (shouldShowVoteHint()) openVoteHint();
+      }, 180);
+    }
 
     if (refreshTimer === null && isExpandedView) {
       const refreshMs = 6000;
@@ -1346,6 +1478,8 @@ async function refreshPostState() {
       }
     }
     userVotes = nextVotes;
+    syncVotesFromStorage();
+    persistLocalVoteState();
     userElo = data.userElo;
     lastSubmittedElo = userElo;
 
@@ -1675,12 +1809,6 @@ function layoutBadges(force = false) {
   badgesEl.style.height = `${r.h}px`;
   applyBadgeVisibility();
   renderBadgesInto(badgesEl, image, scaleBase, true);
-
-  for (const placement of image.placements) {
-    if ((recentVoteAnimationUntil[placement.id] ?? 0) > Date.now()) {
-      scheduleRecentVoteAnimation(placement.id);
-    }
-  }
 }
 
 function renderBadgesInto(
@@ -1777,6 +1905,15 @@ function renderBadgesInto(
     }
 
     if (interactive && pd.mode === "vote" && canVoteOnCurrentPost()) {
+      el.addEventListener("pointerdown", (event) => {
+        if (Date.now() < suppressPickerReopenUntil) {
+          return;
+        }
+        if (event.button !== undefined && event.button !== 0) {
+          return;
+        }
+        playBadgeTapAnimation(el);
+      });
       el.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -2071,6 +2208,8 @@ async function voteBadge(p: BadgePlacement, cls: BadgeVoteOption) {
   userVotes[p.id] = cls;
   localVoteGraceUntil[p.id] = Date.now() + 15000;
   layoutBadges();
+  persistLocalVoteState();
+  scheduleRecentVoteAnimation(p.id);
 
   try {
     const res = await fetch(ApiEndpoint.VoteBadge, {
@@ -2089,6 +2228,8 @@ async function voteBadge(p: BadgePlacement, cls: BadgeVoteOption) {
       counted?: boolean;
       invalidatedBadgeIds?: string[];
     };
+    hasEverSubmittedBadgeVote = true;
+    closeVoteHint();
     if (data.allConsensus) consensus = data.allConsensus;
     else if (data.consensus) consensus[p.id] = data.consensus;
 
@@ -2098,17 +2239,15 @@ async function voteBadge(p: BadgePlacement, cls: BadgeVoteOption) {
       delete recentVoteAnimationUntil[invalidId];
     }
 
-    if (userVotes[p.id] === cls) {
-      delete localVoteGraceUntil[p.id];
-    }
-
     layoutBadges();
+    persistLocalVoteState();
   } catch (err) {
     console.error(err);
     if (previousVote) userVotes[p.id] = previousVote;
     else delete userVotes[p.id];
     delete localVoteGraceUntil[p.id];
     layoutBadges();
+    persistLocalVoteState();
   }
 }
 

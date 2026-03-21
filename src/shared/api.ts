@@ -252,6 +252,7 @@ export type InitResponse = {
   userId: string;
   isOwnPost: boolean;
   isModerator: boolean;
+  hasEverSubmittedBadgeVote: boolean;
   postData: PostData | null;
   consensus: Record<string, BadgeConsensus>;
   userVotes: Record<string, BadgeVoteOption>;
