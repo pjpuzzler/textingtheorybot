@@ -880,13 +880,16 @@ async function onInit(): Promise<InitResponse> {
   let eloVoteCount = 0;
   let hasEverSubmittedBadgeVote = false;
 
-  const [uvRaw, userEloRaw, allEloRaw, isModerator, hasBadgeVoteRaw] = await Promise.all([
-    userId ? redis.hGetAll(userVotesKey(postId, userId)) : Promise.resolve({}),
-    userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
-    redis.get(eloVotesKey(postId)),
-    userId ? isCurrentUserModerator() : Promise.resolve(false),
-    userId ? redis.get(userHasBadgeVoteKey(userId)) : Promise.resolve(null),
-  ]);
+  const [uvRaw, userEloRaw, allEloRaw, isModerator, hasBadgeVoteRaw] =
+    await Promise.all([
+      userId
+        ? redis.hGetAll(userVotesKey(postId, userId))
+        : Promise.resolve({}),
+      userId ? redis.get(userEloKey(postId, userId)) : Promise.resolve(null),
+      redis.get(eloVotesKey(postId)),
+      userId ? isCurrentUserModerator() : Promise.resolve(false),
+      userId ? redis.get(userHasBadgeVoteKey(userId)) : Promise.resolve(null),
+    ]);
 
   for (const [bid, cls] of Object.entries(uvRaw)) {
     if (typeof cls === "string" && isValidBadgeVoteClassification(cls)) {

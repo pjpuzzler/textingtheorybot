@@ -872,8 +872,7 @@ function playBadgeTapAnimation(badgeEl: HTMLDivElement): void {
   badgeEl.style.transform = "translate(-50%, -50%) scale(0.93)";
   void badgeEl.offsetWidth;
   requestAnimationFrame(() => {
-    badgeEl.style.transition =
-      "transform 170ms cubic-bezier(0.2, 0.9, 0.2, 1)";
+    badgeEl.style.transition = "transform 170ms cubic-bezier(0.2, 0.9, 0.2, 1)";
     badgeEl.style.transform = "translate(-50%, -50%) scale(1)";
     window.setTimeout(() => {
       badgeEl.style.transition = "";
