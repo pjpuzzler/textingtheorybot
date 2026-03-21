@@ -405,7 +405,7 @@ export function iqmToClassification(
   }
 
   // Standard mapping
-  if (iqm >= 2.75) return Classification.SUPERBRILLIANT;
+  if (iqm == 3.0) return Classification.SUPERBRILLIANT;
   if (iqm >= 2.5) return Classification.BRILLIANT;
   if (iqm >= 1.5) return Classification.GREAT;
   if (iqm >= 0.75) return Classification.BEST;
@@ -413,7 +413,7 @@ export function iqmToClassification(
   if (iqm >= -0.25) return Classification.GOOD;
   if (iqm >= -0.75) return Classification.INACCURACY;
   if (iqm >= -1.5) return Classification.MISTAKE;
-  if (iqm >= -1.75) return Classification.BLUNDER;
+  if (iqm > -2.0) return Classification.BLUNDER;
   return Classification.MEGABLUNDER;
 }
 
