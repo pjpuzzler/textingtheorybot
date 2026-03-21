@@ -648,7 +648,7 @@ body {
   height: 11px;
   border-radius: 5px;
   outline: none;
-  touch-action: none;
+  touch-action: pan-x;
 }
 
 .elo-slider::-webkit-slider-runnable-track {

@@ -64,7 +64,6 @@ const SWIPE_SETTLE_DURATION_MS = 215;
 const SWIPE_RESET_DURATION_MS = 260;
 const ELO_THUMB_SIZE_PX = 24;
 const ELO_BUBBLE_HIDE_DELAY_MS = 900;
-const ELO_INTERACTION_FAILSAFE_MS = 1100;
 const UNVOTED_RING_WIDTH_PX = 2;
 const BADGE_VISIBILITY_TOGGLE_ENABLED = false;
 const PICKER_ITEM_CLICK_FALLBACK_GUARD_MS = 500;
@@ -96,10 +95,10 @@ let lastPersistedPageIndex = -1;
 let swipeInputMode: "touch" | "pointer" | null = null;
 let swipePointerId: number | null = null;
 let eloPointerId: number | null = null;
-let eloPointerValue: number | null = null;
 let eloTouchId: number | null = null;
 let eloBubbleHideTimer: number | null = null;
 let eloInteractionFailsafeTimer: number | null = null;
+let suppressEloBubbleUntil = 0;
 let swipeTransformRaf: number | null = null;
 let pendingActiveSwipeDx = 0;
 let pendingPreviewSwipeDx: number | null = null;
@@ -1063,17 +1062,6 @@ function clearEloInteractionFailsafe(): void {
   }
 }
 
-function armEloInteractionFailsafe(): void {
-  clearEloInteractionFailsafe();
-  eloInteractionFailsafeTimer = window.setTimeout(() => {
-    eloPointerId = null;
-    eloPointerValue = null;
-    eloTouchId = null;
-    hideEloBubble(true);
-    eloInteractionFailsafeTimer = null;
-  }, ELO_INTERACTION_FAILSAFE_MS);
-}
-
 function hideEloBubble(immediate = false): void {
   clearEloBubbleHideTimer();
   eloBubble.classList.remove("elo-bubble--active");
@@ -1117,6 +1105,7 @@ function updateEloBubblePosition(): void {
 }
 
 function showEloBubble(active: boolean): void {
+  if (Date.now() < suppressEloBubbleUntil) return;
   clearEloBubbleHideTimer();
   eloBubble.classList.add("elo-bubble--visible");
   eloBubble.classList.toggle("elo-bubble--active", active);
@@ -2434,8 +2423,9 @@ function cancelSwipeGesture(): void {
   animateCanvasDragReset();
 }
 
-function setEloFromClientX(clientX: number): number {
+function setEloFromClientX(clientX: number): void {
   const rect = eloSlider.getBoundingClientRect();
+  if (rect.width <= 0) return;
   const min = Number(eloSlider.min) || MIN_ELO;
   const max = Number(eloSlider.max) || MAX_ELO;
   const step = Number(eloSlider.step) || 50;
@@ -2443,17 +2433,35 @@ function setEloFromClientX(clientX: number): number {
   const trackLeft = rect.left + thumbInset;
   const trackRight = rect.right - thumbInset;
   const clampedX = Math.max(trackLeft, Math.min(trackRight, clientX));
-  const t =
+  const ratio =
     trackRight > trackLeft
       ? (clampedX - trackLeft) / (trackRight - trackLeft)
       : 0;
-  const raw = min + t * (max - min);
-  const snapped = min + Math.round((raw - min) / step) * step;
-  const value = Math.max(min, Math.min(max, snapped));
-  eloPointerValue = value;
-  eloSlider.value = String(value);
+  const rawValue = min + ratio * (max - min);
+  const snappedValue = min + Math.round((rawValue - min) / step) * step;
+  const nextValue = Math.max(min, Math.min(max, snappedValue));
+  eloSlider.value = String(nextValue);
   updateEloDisplay();
-  return value;
+}
+
+function shouldIgnoreAndroidTouchPointer(event: PointerEvent): boolean {
+  return isAndroidLike() && event.pointerType === "touch";
+}
+
+function endEloPointerInteraction(pointerId?: number): void {
+  if (pointerId !== undefined && eloPointerId !== pointerId) return;
+  clearEloInteractionFailsafe();
+  eloPointerId = null;
+  showEloBubble(false);
+  hideEloBubble();
+}
+
+function endEloTouchInteraction(touchId?: number): void {
+  if (touchId !== undefined && eloTouchId !== touchId) return;
+  clearEloInteractionFailsafe();
+  eloTouchId = null;
+  showEloBubble(false);
+  hideEloBubble();
 }
 
 canvasEl.addEventListener(
@@ -2668,105 +2676,35 @@ document.addEventListener(
 );
 
 eloSlider.addEventListener("pointerdown", (event) => {
+  if (shouldIgnoreAndroidTouchPointer(event)) return;
   if (event.button !== 0) return;
   eloPointerId = event.pointerId;
-  armEloInteractionFailsafe();
-  try {
-    eloSlider.setPointerCapture(event.pointerId);
-  } catch {}
+  clearEloInteractionFailsafe();
   setEloFromClientX(event.clientX);
   showEloBubble(true);
-  event.preventDefault();
 });
 
 eloSlider.addEventListener("pointermove", (event) => {
+  if (shouldIgnoreAndroidTouchPointer(event)) return;
   if (eloPointerId !== event.pointerId) return;
-  armEloInteractionFailsafe();
-  setEloFromClientX(event.clientX);
+  clearEloInteractionFailsafe();
   showEloBubble(true);
-  event.preventDefault();
 });
 
-function clearEloPointer(pointerId: number): void {
-  if (eloPointerId !== pointerId) return;
-  clearEloInteractionFailsafe();
-  eloPointerId = null;
-  try {
-    eloSlider.releasePointerCapture(pointerId);
-  } catch {}
-  eloPointerValue = null;
-}
-
-function stopEloTouchGesture(): void {
-  clearEloInteractionFailsafe();
-  eloTouchId = null;
-}
-
-function getTrackedEloTouch(event: TouchEvent): Touch | null {
-  const touches = event.touches.length ? event.touches : event.changedTouches;
-  for (let index = 0; index < touches.length; index += 1) {
-    const touch = touches.item(index);
-    if (!touch) continue;
-    if (eloTouchId === null || touch.identifier === eloTouchId) {
-      return touch;
-    }
-  }
-  return null;
-}
-
-document.addEventListener(
-  "touchmove",
-  (event) => {
-    if (eloTouchId === null) return;
-    if (!getTrackedEloTouch(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  },
-  { passive: false, capture: true },
-);
-
-document.addEventListener(
-  "touchend",
-  (event) => {
-    if (eloTouchId === null) return;
-    if (!getTrackedEloTouch(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  },
-  { passive: false, capture: true },
-);
-
-document.addEventListener(
-  "touchcancel",
-  (event) => {
-    if (eloTouchId === null) return;
-    if (!getTrackedEloTouch(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  },
-  { passive: false, capture: true },
-);
-
 eloSlider.addEventListener("pointerup", (event) => {
-  if (eloPointerId !== event.pointerId) return;
-  if (eloPointerValue !== null) {
-    eloSlider.value = String(eloPointerValue);
-    updateEloDisplay();
-  }
-  clearEloPointer(event.pointerId);
-  showEloBubble(false);
-  hideEloBubble();
-  event.preventDefault();
+  if (shouldIgnoreAndroidTouchPointer(event)) return;
+  endEloPointerInteraction(event.pointerId);
 });
 
 eloSlider.addEventListener("pointercancel", (event) => {
-  clearEloPointer(event.pointerId);
-  hideEloBubble();
+  if (shouldIgnoreAndroidTouchPointer(event)) return;
+  endEloPointerInteraction(event.pointerId);
 });
 
 document.addEventListener(
   "pointerup",
-  () => {
+  (event) => {
+    endEloPointerInteraction(event.pointerId);
     hideEloBubbleIfIdle();
   },
   { capture: true },
@@ -2774,7 +2712,8 @@ document.addEventListener(
 
 document.addEventListener(
   "pointercancel",
-  () => {
+  (event) => {
+    endEloPointerInteraction(event.pointerId);
     hideEloBubbleIfIdle();
   },
   { capture: true },
@@ -2786,11 +2725,9 @@ eloSlider.addEventListener(
     const touch = event.touches[0];
     if (!touch) return;
     eloTouchId = touch.identifier;
-    armEloInteractionFailsafe();
+    clearEloInteractionFailsafe();
     setEloFromClientX(touch.clientX);
     showEloBubble(true);
-    event.preventDefault();
-    event.stopPropagation();
   },
   { passive: false },
 );
@@ -2798,13 +2735,11 @@ eloSlider.addEventListener(
 eloSlider.addEventListener(
   "touchmove",
   (event) => {
-    const touch = getTrackedEloTouch(event);
+    const touch = event.touches[0];
     if (!touch) return;
-    armEloInteractionFailsafe();
-    setEloFromClientX(touch.clientX);
+    if (eloTouchId !== null && touch.identifier !== eloTouchId) return;
+    clearEloInteractionFailsafe();
     showEloBubble(true);
-    event.preventDefault();
-    event.stopPropagation();
   },
   { passive: false },
 );
@@ -2812,15 +2747,9 @@ eloSlider.addEventListener(
 eloSlider.addEventListener(
   "touchend",
   (event) => {
-    const touch = getTrackedEloTouch(event);
+    const touch = event.changedTouches[0];
     if (!touch) return;
-    setEloFromClientX(touch.clientX);
-    updateEloDisplay();
-    stopEloTouchGesture();
-    showEloBubble(false);
-    hideEloBubble();
-    event.preventDefault();
-    event.stopPropagation();
+    endEloTouchInteraction(touch.identifier);
   },
   { passive: false },
 );
@@ -2828,24 +2757,22 @@ eloSlider.addEventListener(
 eloSlider.addEventListener(
   "touchcancel",
   (event) => {
-    if (!getTrackedEloTouch(event)) return;
-    stopEloTouchGesture();
-    hideEloBubble();
-    event.preventDefault();
-    event.stopPropagation();
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    endEloTouchInteraction(touch.identifier);
   },
   { passive: false },
 );
 
 eloSlider.addEventListener("input", () => {
   updateEloDisplay();
-  if (isEloInteractionActive()) {
-    showEloBubble(true);
-  }
+  showEloBubble(isEloInteractionActive());
 });
 eloSlider.addEventListener("focus", () => {
   updateEloDisplay();
-  hideEloBubble(true);
+  if (Date.now() >= suppressEloBubbleUntil) {
+    showEloBubble(false);
+  }
 });
 eloSlider.addEventListener("blur", () => {
   clearEloInteractionFailsafe();
@@ -2860,6 +2787,11 @@ window.addEventListener("resize", () => {
 });
 
 eloBtn.addEventListener("click", async () => {
+  suppressEloBubbleUntil = Date.now() + 350;
+  endEloTouchInteraction();
+  endEloPointerInteraction();
+  eloSlider.blur();
+  hideEloBubble(true);
   if (postData && postData.creatorId === viewerUserId) {
     showToast("You can’t vote on your own post");
     return;
