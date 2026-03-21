@@ -54,6 +54,10 @@ const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
 const ELO_VOTE_STEP = 50;
+const PRIMARY_SUBREDDIT_NAMES = [
+  "TextingTheory",
+  "textingtheorybot_dev",
+] as const;
 const DEFAULT_CUSTOM_POST_STYLES = {
   backgroundColor: "#FFFFFFFF",
   backgroundColorDark: "#111317FF",
@@ -262,6 +266,7 @@ async function onRequest(
       body = await onUpdatePost(req);
       break;
     case ApiEndpoint.MenuCreate:
+      assertPrimarySubredditFeature();
       const newPost = await reddit.submitCustomPost({
         title: "New Texting Theory Post",
         subredditName: context.subredditName ?? "TextingTheory",
@@ -308,6 +313,9 @@ async function onAppInstall(): Promise<{
   created: boolean;
   postUrl?: string;
 }> {
+  if (!isPrimarySubreddit()) {
+    return { type: "app-install", created: false };
+  }
   const subredditName = context.subredditName;
   if (!subredditName) {
     return { type: "app-install", created: false };
@@ -341,6 +349,21 @@ function getPostId(): string {
   const pid = context.postId;
   if (!pid) throw new Error("No postId in context");
   return pid;
+}
+
+function isPrimarySubreddit(): boolean {
+  const normalizedSubredditName = (context.subredditName ?? "").toLowerCase();
+  return PRIMARY_SUBREDDIT_NAMES.some(
+    (subredditName) => subredditName.toLowerCase() === normalizedSubredditName,
+  );
+}
+
+function assertPrimarySubredditFeature(): void {
+  if (isPrimarySubreddit()) return;
+  throw {
+    status: 403,
+    message: "This feature is only enabled on r/TextingTheory",
+  };
 }
 
 function toPostFullname(postId: string): `t3_${string}` {
@@ -396,6 +419,7 @@ function readContextCommentIdFromMetadata(): string | null {
 }
 
 async function assertCanCreatePost(): Promise<void> {
+  assertPrimarySubredditFeature();
   const subredditName = context.subredditName;
   if (!subredditName) return;
 
@@ -846,6 +870,23 @@ async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
   const userId = context.userId ?? "";
 
+  if (!isPrimarySubreddit()) {
+    return {
+      type: "init",
+      postId,
+      userId,
+      isOwnPost: false,
+      isModerator: false,
+      hasEverSubmittedBadgeVote: false,
+      postData: null,
+      consensus: {},
+      userVotes: {},
+      userElo: null,
+      consensusElo: null,
+      eloVoteCount: 0,
+    };
+  }
+
   let postData: PostData | null = null;
   try {
     postData = await getPostData(postId);
@@ -981,6 +1022,7 @@ async function removeBookVotesForBadge(
 }
 
 async function onUpdatePost(req: IncomingMessage): Promise<UpdatePostResponse> {
+  assertPrimarySubredditFeature();
   await assertCurrentUserModerator();
 
   const postId = getPostId();
@@ -1189,6 +1231,7 @@ async function onCreatePost(
 // Vote Badge
 // ============================
 async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
+  assertPrimarySubredditFeature();
   const postId = getPostId();
   const userId = getUserId();
   const body = await readJSON<VoteBadgeRequest>(req);
@@ -1328,6 +1371,7 @@ async function invalidateBrokenBookVotes(
 // Vote ELO
 // ============================
 async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
+  assertPrimarySubredditFeature();
   const postId = getPostId();
   const userId = getUserId();
   const body = await readJSON<VoteEloRequest>(req);
@@ -1403,6 +1447,7 @@ async function updatePostFlair(
     includeVoteCount?: boolean;
   },
 ): Promise<void> {
+  if (!isPrimarySubreddit()) return;
   try {
     const showVisibleElo = options?.showVisibleElo ?? false;
     const colorize = options?.colorize ?? false;
@@ -1450,6 +1495,7 @@ async function finalizeEloIfTimedOut(
   postId: string,
   postData: PostData,
 ): Promise<void> {
+  if (!isPrimarySubreddit()) return;
   if (postData.mode !== "vote") return;
   if (isVoteWindowOpen(postData)) return;
 
@@ -1490,6 +1536,7 @@ async function tryUpdateUserFlair(
   elo: number,
   voteCountAtTimeout: number,
 ): Promise<void> {
+  if (!isPrimarySubreddit()) return;
   try {
     const postData = await getPostData(postId);
     const isMeTarget =
