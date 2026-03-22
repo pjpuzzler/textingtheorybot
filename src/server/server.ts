@@ -32,6 +32,10 @@ import {
   type VoteBadgeResponse,
   type VoteEloRequest,
   type VoteEloResponse,
+  type InspectVotesRequest,
+  type InspectVotesResponse,
+  type RemoveVoteRequest,
+  type RemoveVoteResponse,
   type BadgeVoteOption,
   type PostData,
   type PostImageData,
@@ -52,6 +56,8 @@ const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
 const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
+const USER_SUMMARY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const USER_SUMMARY_RESOLVE_CONCURRENCY = 20;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
 const ELO_VOTE_STEP = 50;
 const PRIMARY_SUBREDDIT_NAMES = [
@@ -69,14 +75,18 @@ const DEFAULT_CUSTOM_POST_STYLES = {
 // ============================
 const postKey = (pid: string) => `tt:post:${pid}`;
 const votesKey = (pid: string, bid: string) => `tt:votes:${pid}:${bid}`;
+const allVotesKey = (pid: string, bid: string) => `tt:allvotes:${pid}:${bid}`;
 const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
+const eloVotersKey = (pid: string) => `tt:elovoters:${pid}`;
+const allEloVotersKey = (pid: string) => `tt:all-elovoters:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 const eloNoCountFlairAppliedKey = (pid: string) =>
   `tt:elo:finalized-nocount:v1:${pid}`;
 const moderatorCacheKey = (subredditName: string, username: string) =>
   `tt:moderator:${subredditName}:${username}`;
+const userSummaryCacheKey = (userId: string) => `tt:user-summary:${userId}`;
 const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus:v2:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
@@ -240,7 +250,9 @@ type ApiResponse =
   | CreatePostResponse
   | UpdatePostResponse
   | VoteBadgeResponse
-  | VoteEloResponse;
+  | VoteEloResponse
+  | InspectVotesResponse
+  | RemoveVoteResponse;
 
 async function onRequest(
   req: IncomingMessage,
@@ -289,6 +301,12 @@ async function onRequest(
       break;
     case ApiEndpoint.VoteElo:
       body = await onVoteElo(req);
+      break;
+    case ApiEndpoint.InspectVotes:
+      body = await onInspectVotes(req);
+      break;
+    case ApiEndpoint.RemoveVote:
+      body = await onRemoveVote(req);
       break;
     case ON_APP_INSTALL_ENDPOINT:
       body = await onAppInstall();
@@ -384,6 +402,121 @@ async function applyCustomPostStyles(postId: string): Promise<void> {
   } catch {
     // best-effort styling only
   }
+}
+
+async function setPostNoVotesFlair(postId: string): Promise<void> {
+  const subredditName = context.subredditName;
+  if (!subredditName) return;
+  const postFullname = postId.startsWith("t3_") ? postId : `t3_${postId}`;
+  await reddit.setPostFlair({
+    subredditName,
+    postId: postFullname as `t3_${string}`,
+    text: NO_VOTES_FLAIR_TEXT,
+    textColor: "light",
+  });
+}
+
+async function resolveUserSummary(userId: string): Promise<{
+  userId: string;
+  username: string;
+  profileUrl: string | null;
+  totalKarma: number | null;
+  accountAgeDays: number | null;
+}> {
+  const cacheKey = userSummaryCacheKey(userId);
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached) as {
+        userId: string;
+        username: string;
+        profileUrl: string | null;
+        totalKarma: number | null;
+        accountAgeDays: number | null;
+        expiresAt: number;
+      };
+      if (
+        typeof parsed.expiresAt === "number" &&
+        parsed.expiresAt > Date.now()
+      ) {
+        return {
+          userId: parsed.userId,
+          username: parsed.username,
+          profileUrl: parsed.profileUrl,
+          totalKarma: parsed.totalKarma,
+          accountAgeDays: parsed.accountAgeDays,
+        };
+      }
+    } catch {
+      // ignore malformed cache and refresh below
+    }
+  }
+
+  try {
+    const user = await reddit.getUserById(userId as `t2_${string}`);
+    const username = user?.username ?? userId;
+    const createdAtMs = user?.createdAt?.getTime?.();
+    const accountAgeDays =
+      typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
+        ? Math.max(0, Math.floor((Date.now() - createdAtMs) / (24 * 60 * 60 * 1000)))
+        : null;
+    const totalKarma = user
+      ? (user.linkKarma || 0) + (user.commentKarma || 0)
+      : null;
+    const summary = {
+      userId,
+      username,
+      profileUrl: user?.username
+        ? `https://www.reddit.com/user/${encodeURIComponent(user.username)}/`
+        : null,
+      totalKarma,
+      accountAgeDays,
+    };
+    await redis.set(
+      cacheKey,
+      JSON.stringify({
+        ...summary,
+        expiresAt: Date.now() + USER_SUMMARY_CACHE_TTL_MS,
+      }),
+    );
+    return summary;
+  } catch {
+    const summary = {
+      userId,
+      username: userId,
+      profileUrl: null,
+      totalKarma: null,
+      accountAgeDays: null,
+    };
+    await redis.set(
+      cacheKey,
+      JSON.stringify({
+        ...summary,
+        expiresAt: Date.now() + USER_SUMMARY_CACHE_TTL_MS,
+      }),
+    );
+    return summary;
+  }
+}
+
+async function resolveUserSummaries(
+  userIds: string[],
+): Promise<Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>> {
+  const resolved = new Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>();
+  for (
+    let index = 0;
+    index < userIds.length;
+    index += USER_SUMMARY_RESOLVE_CONCURRENCY
+  ) {
+    const batch = userIds.slice(index, index + USER_SUMMARY_RESOLVE_CONCURRENCY);
+    const entries = await Promise.all(
+      batch.map(async (userId) => [userId, await resolveUserSummary(userId)] as const),
+    );
+    for (const [userId, summary] of entries) {
+      resolved.set(userId, summary);
+    }
+  }
+  return resolved;
 }
 
 async function applyCustomPostStylesFromUrl(postUrl: string): Promise<void> {
@@ -868,12 +1001,14 @@ function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
 // ============================
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
+  const subredditName = context.subredditName ?? null;
   const userId = context.userId ?? "";
 
   if (!isPrimarySubreddit()) {
     return {
       type: "init",
       postId,
+      subredditName,
       userId,
       isOwnPost: false,
       isModerator: false,
@@ -898,6 +1033,7 @@ async function onInit(): Promise<InitResponse> {
     return {
       type: "init",
       postId,
+      subredditName,
       userId,
       isOwnPost: false,
       isModerator: false,
@@ -989,6 +1125,7 @@ async function onInit(): Promise<InitResponse> {
   return {
     type: "init",
     postId,
+    subredditName,
     userId,
     isOwnPost: !!userId && postData.creatorId === userId,
     isModerator,
@@ -1007,17 +1144,19 @@ async function removeVotesForBadge(
   badgeId: string,
 ): Promise<void> {
   await redis.del(votesKey(postId, badgeId));
+  await redis.del(allVotesKey(postId, badgeId));
 }
 
 async function removeBookVotesForBadge(
   postId: string,
   badgeId: string,
 ): Promise<void> {
-  const allVotes = await redis.hGetAll(votesKey(postId, badgeId));
+  const allVotes = await redis.hGetAll(allVotesKey(postId, badgeId));
   const bookVoterIds = Object.entries(allVotes)
     .filter(([, cls]) => cls === Classification.BOOK)
     .map(([userId]) => userId);
   if (bookVoterIds.length === 0) return;
+  await redis.hDel(allVotesKey(postId, badgeId), bookVoterIds);
   await redis.hDel(votesKey(postId, badgeId), bookVoterIds);
 }
 
@@ -1285,6 +1424,9 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
     redis.hSet(userVotesKey(postId, userId), {
       [body.badgeId]: body.classification,
     }),
+    redis.hSet(allVotesKey(postId, body.badgeId), {
+      [userId]: body.classification,
+    }),
     redis.set(userHasBadgeVoteKey(userId), "1"),
   ]);
   if (eligible) {
@@ -1301,19 +1443,7 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   );
 
   // Recompute all consensus
-  const consensusEntries = await Promise.all(
-    allPlacements.map(async ({ placement: p }) => {
-      const allVotes = await redis.hGetAll(votesKey(postId, p.id));
-      return [p.id, computeBadgeConsensus(allVotes)] as const;
-    }),
-  );
-  const allConsensus: Record<string, BadgeConsensus> = {};
-  for (const [badgeId, computed] of consensusEntries) {
-    allConsensus[badgeId] = computed;
-  }
-
-  await clearConsensusCache(postId);
-  await writeConsensusCache(postId, true, allConsensus);
+  const allConsensus = await recomputeAllBadgeConsensus(postId, postData);
 
   return {
     type: "vote-badge",
@@ -1359,12 +1489,205 @@ async function invalidateBrokenBookVotes(
 
   for (const badgeId of invalidatedBadgeIds) {
     await redis.hDel(userVotesKey(postId, userId), [badgeId]);
+    await redis.hDel(allVotesKey(postId, badgeId), [userId]);
     if (eligible) {
       await redis.hDel(votesKey(postId, badgeId), [userId]);
     }
   }
 
   return invalidatedBadgeIds;
+}
+
+async function recomputeAllBadgeConsensus(
+  postId: string,
+  postData: PostData,
+): Promise<Record<string, BadgeConsensus>> {
+  const allPlacements = getAllPlacements(postData);
+  const voteWindowOpen = isVoteWindowOpen(postData);
+  const consensusEntries = await Promise.all(
+    allPlacements.map(async ({ placement }) => {
+      const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+      const computed = computeBadgeConsensus(allVotes);
+      if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+        computed.classification = iqmToClassification(
+          computed.iqm,
+          computed.voteCounts,
+          computed.totalVotes,
+        );
+      }
+      return [placement.id, computed] as const;
+    }),
+  );
+  const allConsensus: Record<string, BadgeConsensus> = {};
+  for (const [badgeId, computed] of consensusEntries) {
+    allConsensus[badgeId] = computed;
+  }
+  await clearConsensusCache(postId);
+  await writeConsensusCache(postId, voteWindowOpen, allConsensus);
+  return allConsensus;
+}
+
+async function recomputeEloAggregate(
+  postId: string,
+  postData: PostData,
+): Promise<{ consensusElo: number | null; voteCount: number }> {
+  const allEloVoters = await redis.hGetAll(eloVotersKey(postId));
+  const eloArr = Object.values(allEloVoters)
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+
+  if (eloArr.length > 0) {
+    await redis.set(eloVotesKey(postId), JSON.stringify(eloArr));
+  } else {
+    await redis.del(eloVotesKey(postId));
+  }
+
+  const voteCount = eloArr.length;
+  const consensusElo =
+    voteCount > 0 ? Math.round(interquartileMean(eloArr)) : null;
+
+  if (isVoteWindowOpen(postData)) {
+    if (voteCount > 0 && consensusElo !== null) {
+      await updatePostFlair(postId, consensusElo, voteCount, {
+        showVisibleElo: voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
+        colorize: false,
+        tryUserFlair: false,
+      });
+    } else {
+      await setPostNoVotesFlair(postId);
+    }
+  } else {
+    await redis.del(eloFinalizedKey(postId));
+    await redis.del(eloNoCountFlairAppliedKey(postId));
+    await finalizeEloIfTimedOut(postId, postData);
+  }
+
+  return { consensusElo, voteCount };
+}
+
+async function onInspectVotes(
+  req: IncomingMessage,
+): Promise<InspectVotesResponse> {
+  assertPrimarySubredditFeature();
+  await assertCurrentUserModerator();
+
+  const postId = getPostId();
+  const postData = await getPostData(postId);
+  const body = await readJSON<InspectVotesRequest>(req).catch(
+    () => ({ includeUsers: true } as InspectVotesRequest),
+  );
+  const shouldResolveUsers = body.includeUsers !== false;
+
+  const placements = getAllPlacements(postData).map(({ placement }) => placement);
+  const badgeIds = placements.map((placement) => placement.id);
+  const [countedBadgeVoteMaps, countedEloMap] =
+    await Promise.all([
+      Promise.all(badgeIds.map((badgeId) => redis.hGetAll(votesKey(postId, badgeId)))),
+      redis.hGetAll(eloVotersKey(postId)),
+    ]);
+
+  const allUserIds = new Set<string>();
+  for (const voteMap of countedBadgeVoteMaps) {
+    for (const userId of Object.keys(voteMap)) allUserIds.add(userId);
+  }
+  for (const userId of Object.keys(countedEloMap)) allUserIds.add(userId);
+
+  const resolvedUsers = shouldResolveUsers
+    ? await resolveUserSummaries([...allUserIds])
+    : new Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>();
+
+  const badgeVotes: Record<string, InspectVotesResponse["badgeVotes"][string]> = {};
+  for (let index = 0; index < badgeIds.length; index += 1) {
+    const badgeId = badgeIds[index]!;
+    const countedVotes = countedBadgeVoteMaps[index] ?? {};
+    badgeVotes[badgeId] = Object.entries(countedVotes)
+      .filter(([, vote]) => isValidBadgeVoteClassification(vote))
+      .map(([userId, vote]) => {
+        const summary = resolvedUsers.get(userId) ?? {
+          userId,
+          username: userId,
+          profileUrl: null,
+          totalKarma: null,
+          accountAgeDays: null,
+        };
+        return {
+          userId,
+          username: summary.username,
+          profileUrl: summary.profileUrl,
+          totalKarma: summary.totalKarma,
+          accountAgeDays: summary.accountAgeDays,
+          vote: vote as BadgeVoteOption,
+        };
+      })
+      .sort((a, b) => a.username.localeCompare(b.username));
+  }
+
+  const eloVotes = Object.entries(countedEloMap)
+    .map(([userId, rawElo]) => {
+      const summary = resolvedUsers.get(userId) ?? {
+        userId,
+        username: userId,
+        profileUrl: null,
+        totalKarma: null,
+        accountAgeDays: null,
+      };
+      const elo = Number(rawElo);
+      return {
+        userId,
+        username: summary.username,
+        profileUrl: summary.profileUrl,
+        totalKarma: summary.totalKarma,
+        accountAgeDays: summary.accountAgeDays,
+        elo,
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.elo))
+    .sort((a, b) => a.username.localeCompare(b.username));
+
+  return {
+    type: "inspect-votes",
+    eloVotes,
+    badgeVotes,
+  };
+}
+
+async function onRemoveVote(req: IncomingMessage): Promise<RemoveVoteResponse> {
+  assertPrimarySubredditFeature();
+  await assertCurrentUserModerator();
+
+  const postId = getPostId();
+  const body = await readJSON<RemoveVoteRequest>(req);
+  const postData = await getPostData(postId);
+
+  if (body.target === "elo") {
+    await Promise.all([
+      redis.del(userEloKey(postId, body.userId)),
+      redis.hDel(eloVotersKey(postId), [body.userId]),
+      redis.hDel(allEloVotersKey(postId), [body.userId]),
+    ]);
+    await recomputeEloAggregate(postId, postData);
+    return { type: "remove-vote", removed: true };
+  }
+
+  const allPlacements = getAllPlacements(postData);
+  const placementExists = allPlacements.some(
+    ({ placement }) => placement.id === body.badgeId,
+  );
+  if (!placementExists) {
+    throw { status: 404, message: "Badge not found" };
+  }
+
+  await Promise.all([
+    redis.hDel(userVotesKey(postId, body.userId), [body.badgeId]),
+    redis.hDel(allVotesKey(postId, body.badgeId), [body.userId]),
+    redis.hDel(votesKey(postId, body.badgeId), [body.userId]),
+  ]);
+
+  const eligible = await isEligibleVoter(postData, body.userId);
+  await invalidateBrokenBookVotes(postId, body.userId, postData, eligible);
+  await recomputeAllBadgeConsensus(postId, postData);
+
+  return { type: "remove-vote", removed: true };
 }
 
 // ============================
@@ -1401,32 +1724,17 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
   await redis.set(userEloKey(postId, userId), String(elo));
 
   // Only eligible votes are counted
-  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
+  const allEloVoters = await redis.hGetAll(eloVotersKey(postId));
+  await redis.hSet(allEloVotersKey(postId), { [userId]: String(elo) });
   if (eligible) {
     allEloVoters[userId] = String(elo);
-    await redis.hSet(`tt:elovoters:${postId}`, { [userId]: String(elo) });
+    await redis.hSet(eloVotersKey(postId), { [userId]: String(elo) });
   }
-
-  const eloArr = Object.values(allEloVoters).map(Number);
-  await redis.set(eloVotesKey(postId), JSON.stringify(eloArr));
-
-  const voteCount = eloArr.length;
-  const consensusElo =
-    voteCount > 0 ? Math.round(interquartileMean(eloArr)) : elo;
-
-  if (voteCount > 0 && isVoteWindowOpen(postData)) {
-    await updatePostFlair(postId, consensusElo, voteCount, {
-      showVisibleElo: voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
-      colorize: false,
-      tryUserFlair: false,
-    });
-  }
-
-  await finalizeEloIfTimedOut(postId, postData);
+  const { consensusElo, voteCount } = await recomputeEloAggregate(postId, postData);
 
   return {
     type: "vote-elo",
-    consensusElo,
+    consensusElo: consensusElo ?? elo,
     voteCount,
     counted: eligible,
     targetLabel: getEloTargetLabel(postData),

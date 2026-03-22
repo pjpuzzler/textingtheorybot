@@ -21,17 +21,19 @@
       <div class="canvas" id="canvas">
         <img class="canvas-img" id="canvas-img" alt="" />
         <div class="badges" id="badges"></div>
-        <button class="quick-create" id="quick-create" aria-label="Create post">
-          +
-        </button>
-        <button
-          class="mod-edit"
-          id="mod-edit"
-          aria-label="Edit post"
-          style="display: none"
-        >
-          Edit
-        </button>
+        <div class="post-menu" id="post-menu">
+          <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div class="menu-dropdown hidden" id="menu-dropdown">
+            <!-- <button class="menu-item" id="menu-info" type="button">Info</button> -->
+            <button class="menu-item" id="menu-create" type="button">Create</button>
+            <button class="menu-item hidden" id="menu-edit" type="button">Edit</button>
+            <button class="menu-item hidden" id="menu-inspect" type="button">Inspect</button>
+          </div>
+        </div>
         <button
           class="badge-visibility"
           id="badge-vis-toggle"
@@ -45,6 +47,12 @@
           <div class="img-dots" id="img-dots"></div>
           <button class="img-nav-btn" id="img-next">›</button>
         </div>
+      </div>
+
+      <div class="inspect-footer hidden" id="inspect-footer">
+        <button class="inspect-footer-btn" id="inspect-elo-btn" type="button">
+          Elo
+        </button>
       </div>
 
       <!-- ELO section -->
@@ -89,6 +97,22 @@
           Vote for Classification (Best → Worst)
         </div>
         <div class="picker-body" id="picker-body"></div>
+      </div>
+    </div>
+
+    <div class="inspector-overlay" id="inspector-overlay">
+      <div class="inspector-bg" id="inspector-bg"></div>
+      <div class="inspector-sheet">
+        <div class="inspector-header">
+          <div class="inspector-heading-block">
+            <div class="inspector-title" id="inspector-title">Inspect Votes</div>
+            <div class="inspector-meta" id="inspector-meta"></div>
+          </div>
+          <button class="inspector-close" id="inspector-close" type="button">
+            Back
+          </button>
+        </div>
+        <div class="inspector-body" id="inspector-body"></div>
       </div>
     </div>
 
