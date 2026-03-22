@@ -836,7 +836,9 @@ function estimateHashStorageBytes(
 
 function formatApproxBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+    return `${(bytes / (1024 * 1024)).toFixed(
+      bytes >= 100 * 1024 * 1024 ? 0 : 1,
+    )} MB`;
   }
   if (bytes >= 1024) {
     return `${(bytes / 1024).toFixed(bytes >= 100 * 1024 ? 0 : 1)} KB`;
@@ -886,18 +888,30 @@ async function onMenuEstimateStorage(): Promise<UiResponse> {
       continue;
     }
 
-    const badgeIds = [...new Set(getAllPlacements(postData).map(({ placement }) => placement.id))];
-    const [openConsensus, closedConsensus, openConsensusMeta, closedConsensusMeta, eloVotesRaw, eloVoters, eloFinalized, eloNoCountFlair] =
-      await Promise.all([
-        redis.get(consensusCacheKey(postId, true)),
-        redis.get(consensusCacheKey(postId, false)),
-        redis.get(consensusCacheMetaKey(postId, true)),
-        redis.get(consensusCacheMetaKey(postId, false)),
-        redis.get(eloVotesKey(postId)),
-        redis.hGetAll(eloVotersKey(postId)),
-        redis.get(eloFinalizedKey(postId)),
-        redis.get(eloNoCountFlairAppliedKey(postId)),
-      ]);
+    const badgeIds = [
+      ...new Set(
+        getAllPlacements(postData).map(({ placement }) => placement.id),
+      ),
+    ];
+    const [
+      openConsensus,
+      closedConsensus,
+      openConsensusMeta,
+      closedConsensusMeta,
+      eloVotesRaw,
+      eloVoters,
+      eloFinalized,
+      eloNoCountFlair,
+    ] = await Promise.all([
+      redis.get(consensusCacheKey(postId, true)),
+      redis.get(consensusCacheKey(postId, false)),
+      redis.get(consensusCacheMetaKey(postId, true)),
+      redis.get(consensusCacheMetaKey(postId, false)),
+      redis.get(eloVotesKey(postId)),
+      redis.hGetAll(eloVotersKey(postId)),
+      redis.get(eloFinalizedKey(postId)),
+      redis.get(eloNoCountFlairAppliedKey(postId)),
+    ]);
 
     estimatedVoteBytes += estimateStringStorageBytes(
       consensusCacheKey(postId, true),
@@ -915,8 +929,14 @@ async function onMenuEstimateStorage(): Promise<UiResponse> {
       consensusCacheMetaKey(postId, false),
       closedConsensusMeta,
     );
-    estimatedVoteBytes += estimateStringStorageBytes(eloVotesKey(postId), eloVotesRaw);
-    estimatedVoteBytes += estimateHashStorageBytes(eloVotersKey(postId), eloVoters);
+    estimatedVoteBytes += estimateStringStorageBytes(
+      eloVotesKey(postId),
+      eloVotesRaw,
+    );
+    estimatedVoteBytes += estimateHashStorageBytes(
+      eloVotersKey(postId),
+      eloVoters,
+    );
     estimatedVoteBytes += estimateStringStorageBytes(
       eloFinalizedKey(postId),
       eloFinalized,
@@ -927,7 +947,10 @@ async function onMenuEstimateStorage(): Promise<UiResponse> {
     );
 
     for (const [userId, elo] of Object.entries(eloVoters)) {
-      estimatedVoteBytes += estimateStringStorageBytes(userEloKey(postId, userId), elo);
+      estimatedVoteBytes += estimateStringStorageBytes(
+        userEloKey(postId, userId),
+        elo,
+      );
     }
 
     const perUserVotes = new Map<string, Record<string, string>>();
@@ -947,7 +970,10 @@ async function onMenuEstimateStorage(): Promise<UiResponse> {
 
       const reverseIndexSource =
         Object.keys(allVotes).length > 0 ? allVotes : countedVotes;
-      if (Object.keys(allVotes).length === 0 && Object.keys(countedVotes).length > 0) {
+      if (
+        Object.keys(allVotes).length === 0 &&
+        Object.keys(countedVotes).length > 0
+      ) {
         lowerBound = true;
       }
 
@@ -973,7 +999,11 @@ async function onMenuEstimateStorage(): Promise<UiResponse> {
     showToast: {
       text:
         appPostCount > 0
-          ? `TT Redis ${qualifier}: ${formatApproxBytes(estimatedTotalBytes)} across ${appPostCount} app posts in the latest ${recentPosts.length} subreddit posts`
+          ? `TT Redis ${qualifier}: ${formatApproxBytes(
+              estimatedTotalBytes,
+            )} across ${appPostCount} app posts in the latest ${
+              recentPosts.length
+            } subreddit posts`
           : `TT Redis estimate found no app posts in the latest ${recentPosts.length} subreddit posts`,
       appearance: "success",
     },
