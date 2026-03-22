@@ -53,6 +53,7 @@ const NO_VOTES_FLAIR_TEXT = "No votes";
 const MIN_VOTER_ACCOUNT_AGE_DAYS = 7;
 const MIN_VOTER_TOTAL_KARMA = 10;
 const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
+const MENU_STORAGE_ESTIMATE_ENDPOINT = "/internal/menu/mod-estimate-storage";
 const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -60,6 +61,7 @@ const USER_SUMMARY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const USER_SUMMARY_RESOLVE_CONCURRENCY = 20;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
 const ELO_VOTE_STEP = 50;
+const STORAGE_ESTIMATE_POST_SCAN_LIMIT = 150;
 const PRIMARY_SUBREDDIT_NAMES = [
   "TextingTheory",
   "textingtheorybot_dev",
@@ -79,7 +81,6 @@ const allVotesKey = (pid: string, bid: string) => `tt:allvotes:${pid}:${bid}`;
 const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
 const eloVotersKey = (pid: string) => `tt:elovoters:${pid}`;
-const allEloVotersKey = (pid: string) => `tt:all-elovoters:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 const eloNoCountFlairAppliedKey = (pid: string) =>
@@ -295,6 +296,9 @@ async function onRequest(
       break;
     case ApiEndpoint.FormCommentReplyClassification:
       body = await onFormCommentReplyClassification(req);
+      break;
+    case MENU_STORAGE_ESTIMATE_ENDPOINT:
+      body = await onMenuEstimateStorage();
       break;
     case ApiEndpoint.VoteBadge:
       body = await onVoteBadge(req);
@@ -809,6 +813,173 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function estimateStringStorageBytes(
+  key: string,
+  value: string | null | undefined,
+): number {
+  if (value == null) return 0;
+  return Buffer.byteLength(key) + Buffer.byteLength(value);
+}
+
+function estimateHashStorageBytes(
+  key: string,
+  values: Record<string, string>,
+): number {
+  const entries = Object.entries(values);
+  if (entries.length === 0) return 0;
+  return entries.reduce(
+    (total, [field, value]) =>
+      total + Buffer.byteLength(field) + Buffer.byteLength(value),
+    Buffer.byteLength(key),
+  );
+}
+
+function formatApproxBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(bytes >= 100 * 1024 ? 0 : 1)} KB`;
+  }
+  return `${bytes} B`;
+}
+
+async function onMenuEstimateStorage(): Promise<UiResponse> {
+  assertPrimarySubredditFeature();
+  await assertCurrentUserModerator();
+
+  const subredditName = context.subredditName;
+  if (!subredditName) {
+    return {
+      showToast: {
+        text: "Subreddit unavailable",
+        appearance: "neutral",
+      },
+    };
+  }
+
+  const recentPosts = await reddit
+    .getNewPosts({
+      subredditName,
+      limit: STORAGE_ESTIMATE_POST_SCAN_LIMIT,
+      pageSize: 100,
+    })
+    .all();
+
+  let appPostCount = 0;
+  let estimatedPostBytes = 0;
+  let estimatedVoteBytes = 0;
+  let lowerBound = false;
+
+  for (const post of recentPosts) {
+    const postId = post.id;
+    const rawPost = await redis.get(postKey(postId));
+    if (!rawPost) continue;
+
+    appPostCount += 1;
+    estimatedPostBytes += estimateStringStorageBytes(postKey(postId), rawPost);
+
+    let postData: PostData;
+    try {
+      postData = normalizePostData(JSON.parse(rawPost) as PostData);
+    } catch {
+      continue;
+    }
+
+    const badgeIds = [...new Set(getAllPlacements(postData).map(({ placement }) => placement.id))];
+    const [openConsensus, closedConsensus, openConsensusMeta, closedConsensusMeta, eloVotesRaw, eloVoters, eloFinalized, eloNoCountFlair] =
+      await Promise.all([
+        redis.get(consensusCacheKey(postId, true)),
+        redis.get(consensusCacheKey(postId, false)),
+        redis.get(consensusCacheMetaKey(postId, true)),
+        redis.get(consensusCacheMetaKey(postId, false)),
+        redis.get(eloVotesKey(postId)),
+        redis.hGetAll(eloVotersKey(postId)),
+        redis.get(eloFinalizedKey(postId)),
+        redis.get(eloNoCountFlairAppliedKey(postId)),
+      ]);
+
+    estimatedVoteBytes += estimateStringStorageBytes(
+      consensusCacheKey(postId, true),
+      openConsensus,
+    );
+    estimatedVoteBytes += estimateStringStorageBytes(
+      consensusCacheKey(postId, false),
+      closedConsensus,
+    );
+    estimatedVoteBytes += estimateStringStorageBytes(
+      consensusCacheMetaKey(postId, true),
+      openConsensusMeta,
+    );
+    estimatedVoteBytes += estimateStringStorageBytes(
+      consensusCacheMetaKey(postId, false),
+      closedConsensusMeta,
+    );
+    estimatedVoteBytes += estimateStringStorageBytes(eloVotesKey(postId), eloVotesRaw);
+    estimatedVoteBytes += estimateHashStorageBytes(eloVotersKey(postId), eloVoters);
+    estimatedVoteBytes += estimateStringStorageBytes(
+      eloFinalizedKey(postId),
+      eloFinalized,
+    );
+    estimatedVoteBytes += estimateStringStorageBytes(
+      eloNoCountFlairAppliedKey(postId),
+      eloNoCountFlair,
+    );
+
+    for (const [userId, elo] of Object.entries(eloVoters)) {
+      estimatedVoteBytes += estimateStringStorageBytes(userEloKey(postId, userId), elo);
+    }
+
+    const perUserVotes = new Map<string, Record<string, string>>();
+    for (const badgeId of badgeIds) {
+      const [countedVotes, allVotes] = await Promise.all([
+        redis.hGetAll(votesKey(postId, badgeId)),
+        redis.hGetAll(allVotesKey(postId, badgeId)),
+      ]);
+      estimatedVoteBytes += estimateHashStorageBytes(
+        votesKey(postId, badgeId),
+        countedVotes,
+      );
+      estimatedVoteBytes += estimateHashStorageBytes(
+        allVotesKey(postId, badgeId),
+        allVotes,
+      );
+
+      const reverseIndexSource =
+        Object.keys(allVotes).length > 0 ? allVotes : countedVotes;
+      if (Object.keys(allVotes).length === 0 && Object.keys(countedVotes).length > 0) {
+        lowerBound = true;
+      }
+
+      for (const [userId, vote] of Object.entries(reverseIndexSource)) {
+        const userVotes = perUserVotes.get(userId) ?? {};
+        userVotes[badgeId] = vote;
+        perUserVotes.set(userId, userVotes);
+      }
+    }
+
+    for (const [userId, userVotes] of perUserVotes) {
+      estimatedVoteBytes += estimateHashStorageBytes(
+        userVotesKey(postId, userId),
+        userVotes,
+      );
+    }
+  }
+
+  const estimatedTotalBytes = estimatedPostBytes + estimatedVoteBytes;
+  const qualifier = lowerBound ? "lower-bound" : "estimate";
+
+  return {
+    showToast: {
+      text:
+        appPostCount > 0
+          ? `TT Redis ${qualifier}: ${formatApproxBytes(estimatedTotalBytes)} across ${appPostCount} app posts in the latest ${recentPosts.length} subreddit posts`
+          : `TT Redis estimate found no app posts in the latest ${recentPosts.length} subreddit posts`,
+      appearance: "success",
+    },
+  };
+}
+
 async function findAsyncImagePost(
   subredditName: string,
   title: string,
@@ -1163,7 +1334,11 @@ async function removeBookVotesForBadge(
   badgeId: string,
 ): Promise<void> {
   const allVotes = await redis.hGetAll(allVotesKey(postId, badgeId));
-  const bookVoterIds = Object.entries(allVotes)
+  const voteSource =
+    Object.keys(allVotes).length > 0
+      ? allVotes
+      : await redis.hGetAll(votesKey(postId, badgeId));
+  const bookVoterIds = Object.entries(voteSource)
     .filter(([, cls]) => cls === Classification.BOOK)
     .map(([userId]) => userId);
   if (bookVoterIds.length === 0) return;
@@ -1682,7 +1857,6 @@ async function onRemoveVote(req: IncomingMessage): Promise<RemoveVoteResponse> {
     await Promise.all([
       redis.del(userEloKey(postId, body.userId)),
       redis.hDel(eloVotersKey(postId), [body.userId]),
-      redis.hDel(allEloVotersKey(postId), [body.userId]),
     ]);
     await recomputeEloAggregate(postId, postData);
     return { type: "remove-vote", removed: true };
@@ -1744,7 +1918,6 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
 
   // Only eligible votes are counted
   const allEloVoters = await redis.hGetAll(eloVotersKey(postId));
-  await redis.hSet(allEloVotersKey(postId), { [userId]: String(elo) });
   if (eligible) {
     allEloVoters[userId] = String(elo);
     await redis.hSet(eloVotersKey(postId), { [userId]: String(elo) });

@@ -11,6 +11,12 @@
   "menu": {
     "items": [
       {
+        "label": "Estimate TT Redis Usage",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/mod-estimate-storage"
+      },
+      {
         "label": "Reply With Classification Image",
         "forUserType": "user",
         "location": "comment",
