@@ -110,7 +110,10 @@ let suppressRefreshUntil = 0;
 let inspectorReloadToken = 0;
 let inspectData: InspectVotesResponse | null = null;
 let inspectModeActive = false;
-let inspectDetailTarget: { kind: "elo" } | { kind: "badge"; badgeId: string } | null = null;
+let inspectDetailTarget:
+  | { kind: "elo" }
+  | { kind: "badge"; badgeId: string }
+  | null = null;
 
 type StoredVoteSnapshot = {
   updatedAt: number;
@@ -138,7 +141,9 @@ const pageChip = $("page-chip") as HTMLDivElement;
 const postMenuEl = $("post-menu") as HTMLDivElement;
 const menuToggleBtn = $("menu-toggle") as HTMLButtonElement;
 const menuDropdownEl = $("menu-dropdown") as HTMLDivElement;
-const menuInfoBtn = document.getElementById("menu-info") as HTMLButtonElement | null;
+const menuInfoBtn = document.getElementById(
+  "menu-info",
+) as HTMLButtonElement | null;
 const menuCreateBtn = $("menu-create") as HTMLButtonElement;
 const menuEditBtn = $("menu-edit") as HTMLButtonElement;
 const menuInspectBtn = $("menu-inspect") as HTMLButtonElement;
@@ -201,7 +206,11 @@ function setExpandedInspectIntent(): void {
     if (!currentPostId) return;
     window.localStorage.setItem(
       expandedInspectIntentKey(),
-      JSON.stringify({ postId: currentPostId, mode: "inspect", createdAt: Date.now() }),
+      JSON.stringify({
+        postId: currentPostId,
+        mode: "inspect",
+        createdAt: Date.now(),
+      }),
     );
   } catch {
     // ignore storage issues in embedded views
@@ -251,10 +260,7 @@ function readInspectTargetFromLocation():
 }
 
 function updateInspectLocation(
-  target:
-    | { kind: "elo" }
-    | { kind: "badge"; badgeId: string }
-    | null,
+  target: { kind: "elo" } | { kind: "badge"; badgeId: string } | null,
   replace = false,
 ): void {
   if (!isExpandedView) return;
@@ -276,8 +282,15 @@ function updateInspectLocation(
       url.searchParams.set("badgeId", target.badgeId);
     }
   }
-  const method = replace ? window.history.replaceState : window.history.pushState;
-  method.call(window.history, {}, "", `${url.pathname}${url.search}${url.hash}`);
+  const method = replace
+    ? window.history.replaceState
+    : window.history.pushState;
+  method.call(
+    window.history,
+    {},
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
 }
 
 function readStoredVoteSnapshot(): StoredVoteSnapshot | null {
@@ -827,14 +840,19 @@ inspectorCloseBtn.addEventListener("click", (event) => {
 inspectEloBtn.addEventListener("click", (event) => {
   event.preventDefault();
   void openInspectDetail({ kind: "elo" }).catch((error) => {
-    showToast(error instanceof Error ? error.message : "Failed to load vote breakdown");
+    showToast(
+      error instanceof Error ? error.message : "Failed to load vote breakdown",
+    );
   });
 });
 
 document.addEventListener("pointerdown", (event) => {
   const target = event.target as HTMLElement | null;
   if (!target) return;
-  if (!target.closest(".post-menu") && !menuDropdownEl.classList.contains("hidden")) {
+  if (
+    !target.closest(".post-menu") &&
+    !menuDropdownEl.classList.contains("hidden")
+  ) {
     closeMenu();
   }
 });
@@ -868,7 +886,9 @@ window.addEventListener("popstate", () => {
     return;
   }
   void openInspectDetail(nextTarget, false).catch((error) => {
-    showToast(error instanceof Error ? error.message : "Failed to load vote breakdown");
+    showToast(
+      error instanceof Error ? error.message : "Failed to load vote breakdown",
+    );
   });
 });
 
@@ -1706,7 +1726,7 @@ async function refreshPostState(force = false) {
 
     postData = normalizePostData(data.postData);
     currentPostId = data.postId;
-  currentSubredditName = data.subredditName ?? null;
+    currentSubredditName = data.subredditName ?? null;
     viewerOwnsPost = !!data.isOwnPost;
     consensus = data.consensus;
     const now = Date.now();
@@ -2152,9 +2172,15 @@ function renderBadgesInto(
       el.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void openInspectDetail({ kind: "badge", badgeId: p.id }).catch((error) => {
-          showToast(error instanceof Error ? error.message : "Failed to load vote breakdown");
-        });
+        void openInspectDetail({ kind: "badge", badgeId: p.id }).catch(
+          (error) => {
+            showToast(
+              error instanceof Error
+                ? error.message
+                : "Failed to load vote breakdown",
+            );
+          },
+        );
       });
     } else if (interactive && pd.mode === "vote" && canVoteOnCurrentPost()) {
       el.addEventListener("pointerdown", (event) => {
@@ -2394,7 +2420,9 @@ function closePicker() {
 
 function subredditWikiUrl(): string | null {
   if (!currentSubredditName) return null;
-  return `https://www.reddit.com/r/${encodeURIComponent(currentSubredditName.toLowerCase())}/wiki/index/`;
+  return `https://www.reddit.com/r/${encodeURIComponent(
+    currentSubredditName.toLowerCase(),
+  )}/wiki/index/`;
 }
 
 function updateInspectChrome(): void {
@@ -2438,12 +2466,20 @@ async function ensureInspectData(force = false): Promise<InspectVotesResponse> {
   if (token !== inspectorReloadToken) {
     return (
       inspectData ??
-      ({ type: "inspect-votes", badgeVotes: {}, eloVotes: [] } satisfies InspectVotesResponse)
+      ({
+        type: "inspect-votes",
+        badgeVotes: {},
+        eloVotes: [],
+      } satisfies InspectVotesResponse)
     );
   }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Failed to load vote breakdown" }));
-    throw new Error((err as { error?: string }).error ?? "Failed to load vote breakdown");
+    const err = await res
+      .json()
+      .catch(() => ({ error: "Failed to load vote breakdown" }));
+    throw new Error(
+      (err as { error?: string }).error ?? "Failed to load vote breakdown",
+    );
   }
   inspectData = (await res.json()) as InspectVotesResponse;
   updateInspectChrome();
@@ -2453,7 +2489,10 @@ async function ensureInspectData(force = false): Promise<InspectVotesResponse> {
 function openCreateFlow(event?: Event): void {
   closeMenu();
   try {
-    requestExpandedMode((event as unknown as MouseEvent) ?? new MouseEvent("click"), "create");
+    requestExpandedMode(
+      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
+      "create",
+    );
   } catch {
     window.location.href = "/app.html";
   }
@@ -2462,7 +2501,10 @@ function openCreateFlow(event?: Event): void {
 function openEditFlow(event?: Event): void {
   closeMenu();
   try {
-    requestExpandedMode((event as unknown as MouseEvent) ?? new MouseEvent("click"), "edit");
+    requestExpandedMode(
+      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
+      "edit",
+    );
   } catch {
     window.location.href = "/app.html?mode=edit";
   }
@@ -2472,7 +2514,10 @@ function openInspectFlow(event?: Event): void {
   closeMenu();
   setExpandedInspectIntent();
   try {
-    requestExpandedMode((event as unknown as MouseEvent) ?? new MouseEvent("click"), "expanded");
+    requestExpandedMode(
+      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
+      "expanded",
+    );
   } catch {
     window.location.href = "/post-expanded.html?inspect=1";
   }
@@ -2572,7 +2617,9 @@ function createInspectorVoteRow(
 
   const userMetaEl = document.createElement("div");
   userMetaEl.className = "inspector-user-meta";
-  userMetaEl.textContent = `${formatCompactKarma(totalKarma)} • ${formatAccountAgeDays(accountAgeDays)}`;
+  userMetaEl.textContent = `${formatCompactKarma(
+    totalKarma,
+  )} • ${formatAccountAgeDays(accountAgeDays)}`;
 
   const resolvedProfileUrl =
     profileUrl ??
@@ -2613,7 +2660,11 @@ function createInspectorVoteRow(
   return row;
 }
 
-async function removeInspectedVote(target: "elo" | "badge", userId: string, badgeId?: string): Promise<void> {
+async function removeInspectedVote(
+  target: "elo" | "badge",
+  userId: string,
+  badgeId?: string,
+): Promise<void> {
   const body =
     target === "elo"
       ? { target, userId }
@@ -2624,8 +2675,12 @@ async function removeInspectedVote(target: "elo" | "badge", userId: string, badg
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Failed to remove vote" }));
-    throw new Error((err as { error?: string }).error ?? "Failed to remove vote");
+    const err = await res
+      .json()
+      .catch(() => ({ error: "Failed to remove vote" }));
+    throw new Error(
+      (err as { error?: string }).error ?? "Failed to remove vote",
+    );
   }
   await refreshPostState(true);
   await ensureInspectData(true);
@@ -2643,7 +2698,8 @@ function renderInspectDetail(
   if (!data) {
     inspectorTitleEl.textContent = "Inspect Votes";
     inspectorMetaEl.textContent = "";
-    inspectorBody.innerHTML = '<div class="inspector-loading">Loading vote breakdown...</div>';
+    inspectorBody.innerHTML =
+      '<div class="inspector-loading">Loading vote breakdown...</div>';
     return;
   }
 
@@ -2652,9 +2708,12 @@ function renderInspectDetail(
       ? interquartileMean(data.eloVotes.map((entry) => entry.elo))
       : null;
     inspectorTitleEl.textContent = "Elo votes";
-    inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(eloIqm)} • ${data.eloVotes.length} total`;
+    inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(eloIqm)} • ${
+      data.eloVotes.length
+    } total`;
     if (!data.eloVotes.length) {
-      inspectorBody.innerHTML = '<div class="inspector-empty">No Elo votes yet.</div>';
+      inspectorBody.innerHTML =
+        '<div class="inspector-empty">No Elo votes yet.</div>';
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -2674,7 +2733,11 @@ function renderInspectDetail(
             entry.elo,
             () => {
               void removeInspectedVote("elo", entry.userId).catch((error) => {
-                showToast(error instanceof Error ? error.message : "Failed to remove Elo vote");
+                showToast(
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to remove Elo vote",
+                );
               });
             },
           ),
@@ -2684,15 +2747,20 @@ function renderInspectDetail(
     return;
   }
 
-  const placement = getSortedPlacements().find((entry) => entry.id === target.badgeId);
+  const placement = getSortedPlacements().find(
+    (entry) => entry.id === target.badgeId,
+  );
   const votes = data.badgeVotes[target.badgeId] ?? [];
   const winningVote = consensus[target.badgeId]?.winningVote;
   inspectorTitleEl.textContent = winningVote
     ? getVoteOptionInfo(winningVote).label
     : "Badge votes";
-  inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(consensus[target.badgeId]?.iqm ?? null)} • ${votes.length} total`;
+  inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(
+    consensus[target.badgeId]?.iqm ?? null,
+  )} • ${votes.length} total`;
   if (!placement || !votes.length) {
-    inspectorBody.innerHTML = '<div class="inspector-empty">No votes for this badge yet.</div>';
+    inspectorBody.innerHTML =
+      '<div class="inspector-empty">No votes for this badge yet.</div>';
     return;
   }
   const fragment = document.createDocumentFragment();
@@ -2712,9 +2780,15 @@ function renderInspectDetail(
           entry.accountAgeDays,
           entry.vote,
           () => {
-            void removeInspectedVote("badge", entry.userId, placement.id).catch((error) => {
-              showToast(error instanceof Error ? error.message : "Failed to remove badge vote");
-            });
+            void removeInspectedVote("badge", entry.userId, placement.id).catch(
+              (error) => {
+                showToast(
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to remove badge vote",
+                );
+              },
+            );
           },
         ),
       );
@@ -2737,7 +2811,9 @@ async function openInspectDetail(
   try {
     data = await ensureInspectData();
   } catch (error) {
-    inspectorBody.innerHTML = `<div class="inspector-empty">${error instanceof Error ? error.message : "Failed to load vote breakdown"}</div>`;
+    inspectorBody.innerHTML = `<div class="inspector-empty">${
+      error instanceof Error ? error.message : "Failed to load vote breakdown"
+    }</div>`;
     throw error;
   }
   if (!inspectDetailTarget) return;

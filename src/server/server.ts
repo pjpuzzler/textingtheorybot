@@ -458,7 +458,10 @@ async function resolveUserSummary(userId: string): Promise<{
     const createdAtMs = user?.createdAt?.getTime?.();
     const accountAgeDays =
       typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
-        ? Math.max(0, Math.floor((Date.now() - createdAtMs) / (24 * 60 * 60 * 1000)))
+        ? Math.max(
+            0,
+            Math.floor((Date.now() - createdAtMs) / (24 * 60 * 60 * 1000)),
+          )
         : null;
     const totalKarma = user
       ? (user.linkKarma || 0) + (user.commentKarma || 0)
@@ -502,15 +505,23 @@ async function resolveUserSummary(userId: string): Promise<{
 async function resolveUserSummaries(
   userIds: string[],
 ): Promise<Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>> {
-  const resolved = new Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>();
+  const resolved = new Map<
+    string,
+    Awaited<ReturnType<typeof resolveUserSummary>>
+  >();
   for (
     let index = 0;
     index < userIds.length;
     index += USER_SUMMARY_RESOLVE_CONCURRENCY
   ) {
-    const batch = userIds.slice(index, index + USER_SUMMARY_RESOLVE_CONCURRENCY);
+    const batch = userIds.slice(
+      index,
+      index + USER_SUMMARY_RESOLVE_CONCURRENCY,
+    );
     const entries = await Promise.all(
-      batch.map(async (userId) => [userId, await resolveUserSummary(userId)] as const),
+      batch.map(
+        async (userId) => [userId, await resolveUserSummary(userId)] as const,
+      ),
     );
     for (const [userId, summary] of entries) {
       resolved.set(userId, summary);
@@ -1508,7 +1519,11 @@ async function recomputeAllBadgeConsensus(
     allPlacements.map(async ({ placement }) => {
       const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
       const computed = computeBadgeConsensus(allVotes);
-      if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+      if (
+        !voteWindowOpen &&
+        !computed.classification &&
+        computed.totalVotes > 0
+      ) {
         computed.classification = iqmToClassification(
           computed.iqm,
           computed.voteCounts,
@@ -1578,13 +1593,16 @@ async function onInspectVotes(
   );
   const shouldResolveUsers = body.includeUsers !== false;
 
-  const placements = getAllPlacements(postData).map(({ placement }) => placement);
+  const placements = getAllPlacements(postData).map(
+    ({ placement }) => placement,
+  );
   const badgeIds = placements.map((placement) => placement.id);
-  const [countedBadgeVoteMaps, countedEloMap] =
-    await Promise.all([
-      Promise.all(badgeIds.map((badgeId) => redis.hGetAll(votesKey(postId, badgeId)))),
-      redis.hGetAll(eloVotersKey(postId)),
-    ]);
+  const [countedBadgeVoteMaps, countedEloMap] = await Promise.all([
+    Promise.all(
+      badgeIds.map((badgeId) => redis.hGetAll(votesKey(postId, badgeId))),
+    ),
+    redis.hGetAll(eloVotersKey(postId)),
+  ]);
 
   const allUserIds = new Set<string>();
   for (const voteMap of countedBadgeVoteMaps) {
@@ -1596,7 +1614,8 @@ async function onInspectVotes(
     ? await resolveUserSummaries([...allUserIds])
     : new Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>();
 
-  const badgeVotes: Record<string, InspectVotesResponse["badgeVotes"][string]> = {};
+  const badgeVotes: Record<string, InspectVotesResponse["badgeVotes"][string]> =
+    {};
   for (let index = 0; index < badgeIds.length; index += 1) {
     const badgeId = badgeIds[index]!;
     const countedVotes = countedBadgeVoteMaps[index] ?? {};
@@ -1730,7 +1749,10 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
     allEloVoters[userId] = String(elo);
     await redis.hSet(eloVotersKey(postId), { [userId]: String(elo) });
   }
-  const { consensusElo, voteCount } = await recomputeEloAggregate(postId, postData);
+  const { consensusElo, voteCount } = await recomputeEloAggregate(
+    postId,
+    postData,
+  );
 
   return {
     type: "vote-elo",
