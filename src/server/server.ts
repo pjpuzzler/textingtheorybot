@@ -94,62 +94,62 @@ const COMMENT_REPLY_OPTIONS = [
   {
     label: "Superbrilliant",
     value: "Superbrilliant",
-    imageUrl: "https://i.redd.it/e0b466f1s2bf1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Brilliant",
     value: "Brilliant",
-    imageUrl: "https://i.redd.it/43b08h0mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Great",
     value: "Great",
-    imageUrl: "https://i.redd.it/m42nhz1mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Best",
     value: "Best",
-    imageUrl: "https://i.redd.it/9attuvzlnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Excellent",
     value: "Excellent",
-    imageUrl: "https://i.redd.it/w71hme0mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Good",
     value: "Good",
-    imageUrl: "https://i.redd.it/8vmmw22mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Book",
     value: "Book",
-    imageUrl: "https://i.redd.it/jp3hzd0mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Inaccuracy",
     value: "Inaccuracy",
-    imageUrl: "https://i.redd.it/wojij12mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Mistake",
     value: "Mistake",
-    imageUrl: "https://i.redd.it/d9j1r62mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Miss",
     value: "Miss",
-    imageUrl: "https://i.redd.it/6xbod32mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Blunder",
     value: "Blunder",
-    imageUrl: "https://i.redd.it/p5dhke0mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
   {
     label: "Megablunder",
     value: "Megablunder",
-    imageUrl: "https://i.redd.it/qz7nt12mnc5f1.png",
+    imageUrl: "https://i.redd.it/null.png",
   },
 ] as const;
 

@@ -11,12 +11,6 @@
   "menu": {
     "items": [
       {
-        "label": "Estimate TT Redis Usage",
-        "forUserType": "moderator",
-        "location": "subreddit",
-        "endpoint": "/internal/menu/mod-estimate-storage"
-      },
-      {
         "label": "Apply Post Elo Flair",
         "forUserType": "moderator",
         "location": "post",
@@ -24,7 +18,7 @@
       },
       {
         "label": "Reply With Classification Image",
-        "forUserType": "user",
+        "forUserType": "moderator",
         "location": "comment",
         "endpoint": "/internal/menu/comment-reply-classification",
         "postFilter": "none"
