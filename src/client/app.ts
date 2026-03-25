@@ -1455,8 +1455,7 @@ function renderStaticPlacementsInto(
       el.style.backgroundImage = `url(/assets/badges/${placement.classification.toLowerCase()}.png)`;
     }
 
-    const sizePx =
-      (((placement.radius || globalRadius) * 2) / 100) * scaleBase;
+    const sizePx = (((placement.radius || globalRadius) * 2) / 100) * scaleBase;
     el.style.width = `${sizePx}px`;
     el.style.height = `${sizePx}px`;
     el.style.left = `${placement.x}%`;
@@ -1476,7 +1475,10 @@ function renderStaticPlacementsInto(
     if (mode === "vote") {
       const num = document.createElement("div");
       num.className = "ed-num";
-      num.style.fontSize = `${Math.max(9.5, Math.max(12, sizePx * 0.44) * 0.68)}px`;
+      num.style.fontSize = `${Math.max(
+        9.5,
+        Math.max(12, sizePx * 0.44) * 0.68,
+      )}px`;
       num.textContent = String((placement.order ?? index) + 1);
       el.appendChild(num);
     }
@@ -1605,16 +1607,13 @@ function animateEditorSwipeReset(): void {
   cmBadges.style.transform = translateXPx(0);
   cmRedactLayer.style.transform = translateXPx(0);
   if (editorSwipePreviewImg) {
-    editorSwipePreviewImg.style.transition =
-      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+    editorSwipePreviewImg.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
   }
   if (editorSwipePreviewBadges) {
-    editorSwipePreviewBadges.style.transition =
-      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+    editorSwipePreviewBadges.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
   }
   if (editorSwipePreviewRedact) {
-    editorSwipePreviewRedact.style.transition =
-      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+    editorSwipePreviewRedact.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
   }
   window.setTimeout(() => {
     clearEditorSwipePreview();
@@ -1645,7 +1644,10 @@ function applyEditorImageIndexImmediately(
   syncSliderForActiveImage();
   updateImageNav();
   render();
-  if (navTransitionInFlight && (!hadCommittedPreview || immediateTransitionCompletion)) {
+  if (
+    navTransitionInFlight &&
+    (!hadCommittedPreview || immediateTransitionCompletion)
+  ) {
     completeNavigationTransition();
   }
 }
@@ -1759,16 +1761,11 @@ function finishEditorSwipeNavigation(nextIndex: number, dx: number): void {
   const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
 
   cmImg.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
-  cmBadges.style.transition =
-    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
-  cmRedactLayer.style.transition =
-    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
-  editorSwipePreviewImg.style.transition =
-    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
-  editorSwipePreviewBadges.style.transition =
-    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
-  editorSwipePreviewRedact.style.transition =
-    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  cmBadges.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  cmRedactLayer.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewImg.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewBadges.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewRedact.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
 
   requestAnimationFrame(() => {
     cmImg.style.transform = translateXPx(outgoingToX);
@@ -1865,8 +1862,9 @@ function endEditorSwipe(clientX: number, clientY: number): void {
     Math.max(
       SWIPE_COMMIT_MIN_PX,
       Math.round(
-        (cmCanvasWrap.clientWidth || cmCanvasWrap.getBoundingClientRect().width || 0) *
-          SWIPE_COMMIT_RATIO,
+        (cmCanvasWrap.clientWidth ||
+          cmCanvasWrap.getBoundingClientRect().width ||
+          0) * SWIPE_COMMIT_RATIO,
       ),
     ),
   );
@@ -3183,16 +3181,18 @@ function isBookValid(p: BadgePlacement): boolean {
 }
 
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
-  pickerTitle.textContent = mode === "annotated"
-    ? "Choose Badge"
-    : "Choose Classification (Best → Worst)";
+  pickerTitle.textContent =
+    mode === "annotated"
+      ? "Choose Badge"
+      : "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   suppressEditorPickerUntil = Date.now() + 120;
   suppressEditorPickerBackdropUntil =
     Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
-  grid.className = mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
+  grid.className =
+    mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
 
   const bookValid = isBookValid(p);
 
