@@ -34,3 +34,5 @@ coverage/
 
 # Local-only source files
 src/systemPrompt.ts
+
+docs
