@@ -165,7 +165,8 @@ export const RESULT_INFO: Record<ResultVote, { label: string }> = {
 };
 
 export const RESULT_HINTS: Record<ResultVote, string> = {
-  [ResultVote.ABANDON]: "One side abruptly bails on the conversation.",
+  [ResultVote.ABANDON]:
+    "One side abruptly ends the interaction out of nowhere.",
   [ResultVote.CHECKMATED]:
     "A 'win' is secured (e.g., contact info given, a date agreed to, etc.).",
   [ResultVote.DRAW]: "The conversation ends amicably, albeit short of a 'win'.",
@@ -249,7 +250,6 @@ export type BadgeConsensus = {
 export type InitResponse = {
   type: "init";
   postId: string;
-  subredditName: string | null;
   userId: string;
   isOwnPost: boolean;
   isModerator: boolean;
@@ -323,50 +323,6 @@ export type VoteEloResponse = {
   targetLabel: string;
 };
 
-export type InspectBadgeVoteEntry = {
-  userId: string;
-  username: string;
-  profileUrl: string | null;
-  totalKarma: number | null;
-  accountAgeDays: number | null;
-  vote: BadgeVoteOption;
-};
-
-export type InspectEloVoteEntry = {
-  userId: string;
-  username: string;
-  profileUrl: string | null;
-  totalKarma: number | null;
-  accountAgeDays: number | null;
-  elo: number;
-};
-
-export type InspectVotesRequest = {
-  includeUsers?: boolean;
-};
-
-export type InspectVotesResponse = {
-  type: "inspect-votes";
-  eloVotes: InspectEloVoteEntry[];
-  badgeVotes: Record<string, InspectBadgeVoteEntry[]>;
-};
-
-export type RemoveVoteRequest =
-  | {
-      target: "elo";
-      userId: string;
-    }
-  | {
-      target: "badge";
-      userId: string;
-      badgeId: string;
-    };
-
-export type RemoveVoteResponse = {
-  type: "remove-vote";
-  removed: true;
-};
-
 // --- API endpoints ---
 
 export const ApiEndpoint = {
@@ -375,9 +331,8 @@ export const ApiEndpoint = {
   UpdatePost: "/api/update-post",
   VoteBadge: "/api/vote-badge",
   VoteElo: "/api/vote-elo",
-  InspectVotes: "/api/inspect-votes",
-  RemoveVote: "/api/remove-vote",
   MenuCreate: "/internal/menu/create",
+  MenuModeratorApplyPostEloFlair: "/internal/menu/mod-apply-post-elo-flair",
   MenuCommentReplyClassification: "/internal/menu/comment-reply-classification",
   FormCommentReplyClassification:
     "/internal/forms/comment-reply-classification",
@@ -434,7 +389,7 @@ export function iqmToClassification(
   if (iqmTotalVotes > 0) {
     const bookIqmShare =
       (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
-    if (bookIqmShare > 0.5 && -0.25 <= iqm && iqm < 0.25) {
+    if (bookIqmShare > 0.75 && -0.25 <= iqm && iqm < 0.25) {
       return Classification.BOOK;
     }
 

@@ -187,6 +187,10 @@ html.tt-edit-boot #overlay-submit {
   align-items: center;
   justify-content: center;
   background: var(--tt-bg);
+  touch-action: pan-y;
+}
+
+.cm-canvas-wrap.marker-mode {
   touch-action: none;
 }
 
@@ -277,18 +281,18 @@ html.tt-edit-boot #overlay-submit {
 .img-dots {
   position: absolute;
   left: 50%;
-  bottom: 30px;
+  bottom: 24px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  max-width: min(220px, calc(100vw - 140px));
+  gap: 7px;
+  max-width: min(180px, calc(100vw - 150px));
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.48);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 3px 8px;
   pointer-events: auto;
 }
 
@@ -301,8 +305,8 @@ html.tt-edit-boot #overlay-submit {
 }
 
 .img-dot.active {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   background: #fff;
 }
 
@@ -350,12 +354,12 @@ html.tt-edit-boot #overlay-submit {
   right: 8px;
   z-index: 4;
   border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 1px 4px;
+  font-size: 13px;
+  font-weight: 500;
   color: #fff;
-  background: rgba(0, 0, 0, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.24);
 }
 
 .hint {

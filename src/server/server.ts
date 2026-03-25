@@ -32,10 +32,6 @@ import {
   type VoteBadgeResponse,
   type VoteEloRequest,
   type VoteEloResponse,
-  type InspectVotesRequest,
-  type InspectVotesResponse,
-  type RemoveVoteRequest,
-  type RemoveVoteResponse,
   type BadgeVoteOption,
   type PostData,
   type PostImageData,
@@ -53,15 +49,11 @@ const NO_VOTES_FLAIR_TEXT = "No votes";
 const MIN_VOTER_ACCOUNT_AGE_DAYS = 7;
 const MIN_VOTER_TOTAL_KARMA = 10;
 const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
-const MENU_STORAGE_ESTIMATE_ENDPOINT = "/internal/menu/mod-estimate-storage";
 const ANNOTATED_PREFIX = "[Annotated] ";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
-const USER_SUMMARY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const USER_SUMMARY_RESOLVE_CONCURRENCY = 20;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
 const ELO_VOTE_STEP = 50;
-const STORAGE_ESTIMATE_POST_SCAN_LIMIT = 150;
 const PRIMARY_SUBREDDIT_NAMES = [
   "TextingTheory",
   "textingtheorybot_dev",
@@ -77,17 +69,14 @@ const DEFAULT_CUSTOM_POST_STYLES = {
 // ============================
 const postKey = (pid: string) => `tt:post:${pid}`;
 const votesKey = (pid: string, bid: string) => `tt:votes:${pid}:${bid}`;
-const allVotesKey = (pid: string, bid: string) => `tt:allvotes:${pid}:${bid}`;
 const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
-const eloVotersKey = (pid: string) => `tt:elovoters:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 const eloNoCountFlairAppliedKey = (pid: string) =>
   `tt:elo:finalized-nocount:v1:${pid}`;
 const moderatorCacheKey = (subredditName: string, username: string) =>
   `tt:moderator:${subredditName}:${username}`;
-const userSummaryCacheKey = (userId: string) => `tt:user-summary:${userId}`;
 const consensusCacheKey = (pid: string, voteWindowOpen: boolean) =>
   `tt:consensus:v2:${pid}:${voteWindowOpen ? "open" : "closed"}`;
 const consensusCacheMetaKey = (pid: string, voteWindowOpen: boolean) =>
@@ -251,9 +240,7 @@ type ApiResponse =
   | CreatePostResponse
   | UpdatePostResponse
   | VoteBadgeResponse
-  | VoteEloResponse
-  | InspectVotesResponse
-  | RemoveVoteResponse;
+  | VoteEloResponse;
 
 async function onRequest(
   req: IncomingMessage,
@@ -291,26 +278,20 @@ async function onRequest(
       });
       body = { navigateTo: newPost.url } as UiResponse;
       break;
+    case ApiEndpoint.MenuModeratorApplyPostEloFlair:
+      body = await onMenuModeratorApplyPostEloFlair();
+      break;
     case ApiEndpoint.MenuCommentReplyClassification:
       body = await onMenuCommentReplyClassification(req);
       break;
     case ApiEndpoint.FormCommentReplyClassification:
       body = await onFormCommentReplyClassification(req);
       break;
-    case MENU_STORAGE_ESTIMATE_ENDPOINT:
-      body = await onMenuEstimateStorage();
-      break;
     case ApiEndpoint.VoteBadge:
       body = await onVoteBadge(req);
       break;
     case ApiEndpoint.VoteElo:
       body = await onVoteElo(req);
-      break;
-    case ApiEndpoint.InspectVotes:
-      body = await onInspectVotes(req);
-      break;
-    case ApiEndpoint.RemoveVote:
-      body = await onRemoveVote(req);
       break;
     case ON_APP_INSTALL_ENDPOINT:
       body = await onAppInstall();
@@ -406,132 +387,6 @@ async function applyCustomPostStyles(postId: string): Promise<void> {
   } catch {
     // best-effort styling only
   }
-}
-
-async function setPostNoVotesFlair(postId: string): Promise<void> {
-  const subredditName = context.subredditName;
-  if (!subredditName) return;
-  const postFullname = postId.startsWith("t3_") ? postId : `t3_${postId}`;
-  await reddit.setPostFlair({
-    subredditName,
-    postId: postFullname as `t3_${string}`,
-    text: NO_VOTES_FLAIR_TEXT,
-    textColor: "light",
-  });
-}
-
-async function resolveUserSummary(userId: string): Promise<{
-  userId: string;
-  username: string;
-  profileUrl: string | null;
-  totalKarma: number | null;
-  accountAgeDays: number | null;
-}> {
-  const cacheKey = userSummaryCacheKey(userId);
-  const cached = await redis.get(cacheKey);
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached) as {
-        userId: string;
-        username: string;
-        profileUrl: string | null;
-        totalKarma: number | null;
-        accountAgeDays: number | null;
-        expiresAt: number;
-      };
-      if (
-        typeof parsed.expiresAt === "number" &&
-        parsed.expiresAt > Date.now()
-      ) {
-        return {
-          userId: parsed.userId,
-          username: parsed.username,
-          profileUrl: parsed.profileUrl,
-          totalKarma: parsed.totalKarma,
-          accountAgeDays: parsed.accountAgeDays,
-        };
-      }
-    } catch {
-      // ignore malformed cache and refresh below
-    }
-  }
-
-  try {
-    const user = await reddit.getUserById(userId as `t2_${string}`);
-    const username = user?.username ?? userId;
-    const createdAtMs = user?.createdAt?.getTime?.();
-    const accountAgeDays =
-      typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
-        ? Math.max(
-            0,
-            Math.floor((Date.now() - createdAtMs) / (24 * 60 * 60 * 1000)),
-          )
-        : null;
-    const totalKarma = user
-      ? (user.linkKarma || 0) + (user.commentKarma || 0)
-      : null;
-    const summary = {
-      userId,
-      username,
-      profileUrl: user?.username
-        ? `https://www.reddit.com/user/${encodeURIComponent(user.username)}/`
-        : null,
-      totalKarma,
-      accountAgeDays,
-    };
-    await redis.set(
-      cacheKey,
-      JSON.stringify({
-        ...summary,
-        expiresAt: Date.now() + USER_SUMMARY_CACHE_TTL_MS,
-      }),
-    );
-    return summary;
-  } catch {
-    const summary = {
-      userId,
-      username: userId,
-      profileUrl: null,
-      totalKarma: null,
-      accountAgeDays: null,
-    };
-    await redis.set(
-      cacheKey,
-      JSON.stringify({
-        ...summary,
-        expiresAt: Date.now() + USER_SUMMARY_CACHE_TTL_MS,
-      }),
-    );
-    return summary;
-  }
-}
-
-async function resolveUserSummaries(
-  userIds: string[],
-): Promise<Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>> {
-  const resolved = new Map<
-    string,
-    Awaited<ReturnType<typeof resolveUserSummary>>
-  >();
-  for (
-    let index = 0;
-    index < userIds.length;
-    index += USER_SUMMARY_RESOLVE_CONCURRENCY
-  ) {
-    const batch = userIds.slice(
-      index,
-      index + USER_SUMMARY_RESOLVE_CONCURRENCY,
-    );
-    const entries = await Promise.all(
-      batch.map(
-        async (userId) => [userId, await resolveUserSummary(userId)] as const,
-      ),
-    );
-    for (const [userId, summary] of entries) {
-      resolved.set(userId, summary);
-    }
-  }
-  return resolved;
 }
 
 async function applyCustomPostStylesFromUrl(postUrl: string): Promise<void> {
@@ -813,203 +668,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function estimateStringStorageBytes(
-  key: string,
-  value: string | null | undefined,
-): number {
-  if (value == null) return 0;
-  return Buffer.byteLength(key) + Buffer.byteLength(value);
-}
-
-function estimateHashStorageBytes(
-  key: string,
-  values: Record<string, string>,
-): number {
-  const entries = Object.entries(values);
-  if (entries.length === 0) return 0;
-  return entries.reduce(
-    (total, [field, value]) =>
-      total + Buffer.byteLength(field) + Buffer.byteLength(value),
-    Buffer.byteLength(key),
-  );
-}
-
-function formatApproxBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(
-      bytes >= 100 * 1024 * 1024 ? 0 : 1,
-    )} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(bytes >= 100 * 1024 ? 0 : 1)} KB`;
-  }
-  return `${bytes} B`;
-}
-
-async function onMenuEstimateStorage(): Promise<UiResponse> {
-  assertPrimarySubredditFeature();
-  await assertCurrentUserModerator();
-
-  const subredditName = context.subredditName;
-  if (!subredditName) {
-    return {
-      showToast: {
-        text: "Subreddit unavailable",
-        appearance: "neutral",
-      },
-    };
-  }
-
-  const recentPosts = await reddit
-    .getNewPosts({
-      subredditName,
-      limit: STORAGE_ESTIMATE_POST_SCAN_LIMIT,
-      pageSize: 100,
-    })
-    .all();
-
-  let appPostCount = 0;
-  let estimatedPostBytes = 0;
-  let estimatedVoteBytes = 0;
-  let lowerBound = false;
-
-  for (const post of recentPosts) {
-    const postId = post.id;
-    const rawPost = await redis.get(postKey(postId));
-    if (!rawPost) continue;
-
-    appPostCount += 1;
-    estimatedPostBytes += estimateStringStorageBytes(postKey(postId), rawPost);
-
-    let postData: PostData;
-    try {
-      postData = normalizePostData(JSON.parse(rawPost) as PostData);
-    } catch {
-      continue;
-    }
-
-    const badgeIds = [
-      ...new Set(
-        getAllPlacements(postData).map(({ placement }) => placement.id),
-      ),
-    ];
-    const [
-      openConsensus,
-      closedConsensus,
-      openConsensusMeta,
-      closedConsensusMeta,
-      eloVotesRaw,
-      eloVoters,
-      eloFinalized,
-      eloNoCountFlair,
-    ] = await Promise.all([
-      redis.get(consensusCacheKey(postId, true)),
-      redis.get(consensusCacheKey(postId, false)),
-      redis.get(consensusCacheMetaKey(postId, true)),
-      redis.get(consensusCacheMetaKey(postId, false)),
-      redis.get(eloVotesKey(postId)),
-      redis.hGetAll(eloVotersKey(postId)),
-      redis.get(eloFinalizedKey(postId)),
-      redis.get(eloNoCountFlairAppliedKey(postId)),
-    ]);
-
-    estimatedVoteBytes += estimateStringStorageBytes(
-      consensusCacheKey(postId, true),
-      openConsensus,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      consensusCacheKey(postId, false),
-      closedConsensus,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      consensusCacheMetaKey(postId, true),
-      openConsensusMeta,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      consensusCacheMetaKey(postId, false),
-      closedConsensusMeta,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      eloVotesKey(postId),
-      eloVotesRaw,
-    );
-    estimatedVoteBytes += estimateHashStorageBytes(
-      eloVotersKey(postId),
-      eloVoters,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      eloFinalizedKey(postId),
-      eloFinalized,
-    );
-    estimatedVoteBytes += estimateStringStorageBytes(
-      eloNoCountFlairAppliedKey(postId),
-      eloNoCountFlair,
-    );
-
-    for (const [userId, elo] of Object.entries(eloVoters)) {
-      estimatedVoteBytes += estimateStringStorageBytes(
-        userEloKey(postId, userId),
-        elo,
-      );
-    }
-
-    const perUserVotes = new Map<string, Record<string, string>>();
-    for (const badgeId of badgeIds) {
-      const [countedVotes, allVotes] = await Promise.all([
-        redis.hGetAll(votesKey(postId, badgeId)),
-        redis.hGetAll(allVotesKey(postId, badgeId)),
-      ]);
-      estimatedVoteBytes += estimateHashStorageBytes(
-        votesKey(postId, badgeId),
-        countedVotes,
-      );
-      estimatedVoteBytes += estimateHashStorageBytes(
-        allVotesKey(postId, badgeId),
-        allVotes,
-      );
-
-      const reverseIndexSource =
-        Object.keys(allVotes).length > 0 ? allVotes : countedVotes;
-      if (
-        Object.keys(allVotes).length === 0 &&
-        Object.keys(countedVotes).length > 0
-      ) {
-        lowerBound = true;
-      }
-
-      for (const [userId, vote] of Object.entries(reverseIndexSource)) {
-        const userVotes = perUserVotes.get(userId) ?? {};
-        userVotes[badgeId] = vote;
-        perUserVotes.set(userId, userVotes);
-      }
-    }
-
-    for (const [userId, userVotes] of perUserVotes) {
-      estimatedVoteBytes += estimateHashStorageBytes(
-        userVotesKey(postId, userId),
-        userVotes,
-      );
-    }
-  }
-
-  const estimatedTotalBytes = estimatedPostBytes + estimatedVoteBytes;
-  const qualifier = lowerBound ? "lower-bound" : "estimate";
-
-  return {
-    showToast: {
-      text:
-        appPostCount > 0
-          ? `TT Redis ${qualifier}: ${formatApproxBytes(
-              estimatedTotalBytes,
-            )} across ${appPostCount} app posts in the latest ${
-              recentPosts.length
-            } subreddit posts`
-          : `TT Redis estimate found no app posts in the latest ${recentPosts.length} subreddit posts`,
-      appearance: "success",
-    },
-  };
-}
-
 async function findAsyncImagePost(
   subredditName: string,
   title: string,
@@ -1199,6 +857,65 @@ async function onFormCommentReplyClassification(
   return response;
 }
 
+async function onMenuModeratorApplyPostEloFlair(): Promise<UiResponse> {
+  assertPrimarySubredditFeature();
+  await assertCurrentUserModerator();
+
+  const postId = getPostId();
+  const postData = await getPostData(postId);
+  if (postData.mode !== "vote") {
+    return {
+      showToast: {
+        text: "Only vote posts can apply Elo flair",
+        appearance: "neutral",
+      },
+    };
+  }
+  if (isVoteWindowOpen(postData)) {
+    return {
+      showToast: {
+        text: "Wait until voting closes after 24 hours",
+        appearance: "neutral",
+      },
+    };
+  }
+
+  const allEloRaw = await redis.get(eloVotesKey(postId));
+  const eloArr = allEloRaw ? (JSON.parse(allEloRaw) as number[]) : [];
+  const voteCount = eloArr.length;
+  if (voteCount < MIN_VOTES_FOR_POST_FLAIR) {
+    return {
+      showToast: {
+        text: `Need at least ${MIN_VOTES_FOR_POST_FLAIR} Elo votes`,
+        appearance: "neutral",
+      },
+    };
+  }
+
+  const consensusElo = Math.round(interquartileMean(eloArr));
+  const result = await applyAuthorEloFlair(postId, consensusElo, voteCount, {
+    notifyUser: false,
+    ignoreTargetRequirement: true,
+  });
+
+  const messageByResult: Record<UserFlairApplyResult, string> = {
+    applied: `Applied ${consensusElo} Elo flair`,
+    "not-me-target": "This post is not set to award the author an Elo flair",
+    "no-subreddit": "Subreddit context missing",
+    "no-author": "Could not resolve the post author",
+    "non-elo-user-flair": "User has a non-Elo flair, so it was not overwritten",
+    "not-higher": "User flair already matches or exceeds this Elo",
+    failed: "Failed to apply Elo flair",
+  };
+
+  return {
+    showToast: {
+      text: messageByResult[result],
+      appearance: result === "applied" ? "success" : "neutral",
+    },
+  };
+}
+
 function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
   const json = JSON.stringify(body);
   rsp.writeHead(status, {
@@ -1213,14 +930,12 @@ function sendJSON<T>(status: number, body: T, rsp: ServerResponse): void {
 // ============================
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
-  const subredditName = context.subredditName ?? null;
   const userId = context.userId ?? "";
 
   if (!isPrimarySubreddit()) {
     return {
       type: "init",
       postId,
-      subredditName,
       userId,
       isOwnPost: false,
       isModerator: false,
@@ -1245,7 +960,6 @@ async function onInit(): Promise<InitResponse> {
     return {
       type: "init",
       postId,
-      subredditName,
       userId,
       isOwnPost: false,
       isModerator: false,
@@ -1337,7 +1051,6 @@ async function onInit(): Promise<InitResponse> {
   return {
     type: "init",
     postId,
-    subredditName,
     userId,
     isOwnPost: !!userId && postData.creatorId === userId,
     isModerator,
@@ -1356,23 +1069,17 @@ async function removeVotesForBadge(
   badgeId: string,
 ): Promise<void> {
   await redis.del(votesKey(postId, badgeId));
-  await redis.del(allVotesKey(postId, badgeId));
 }
 
 async function removeBookVotesForBadge(
   postId: string,
   badgeId: string,
 ): Promise<void> {
-  const allVotes = await redis.hGetAll(allVotesKey(postId, badgeId));
-  const voteSource =
-    Object.keys(allVotes).length > 0
-      ? allVotes
-      : await redis.hGetAll(votesKey(postId, badgeId));
-  const bookVoterIds = Object.entries(voteSource)
+  const allVotes = await redis.hGetAll(votesKey(postId, badgeId));
+  const bookVoterIds = Object.entries(allVotes)
     .filter(([, cls]) => cls === Classification.BOOK)
     .map(([userId]) => userId);
   if (bookVoterIds.length === 0) return;
-  await redis.hDel(allVotesKey(postId, badgeId), bookVoterIds);
   await redis.hDel(votesKey(postId, badgeId), bookVoterIds);
 }
 
@@ -1640,9 +1347,6 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
     redis.hSet(userVotesKey(postId, userId), {
       [body.badgeId]: body.classification,
     }),
-    redis.hSet(allVotesKey(postId, body.badgeId), {
-      [userId]: body.classification,
-    }),
     redis.set(userHasBadgeVoteKey(userId), "1"),
   ]);
   if (eligible) {
@@ -1659,7 +1363,19 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   );
 
   // Recompute all consensus
-  const allConsensus = await recomputeAllBadgeConsensus(postId, postData);
+  const consensusEntries = await Promise.all(
+    allPlacements.map(async ({ placement: p }) => {
+      const allVotes = await redis.hGetAll(votesKey(postId, p.id));
+      return [p.id, computeBadgeConsensus(allVotes)] as const;
+    }),
+  );
+  const allConsensus: Record<string, BadgeConsensus> = {};
+  for (const [badgeId, computed] of consensusEntries) {
+    allConsensus[badgeId] = computed;
+  }
+
+  await clearConsensusCache(postId);
+  await writeConsensusCache(postId, true, allConsensus);
 
   return {
     type: "vote-badge",
@@ -1705,212 +1421,12 @@ async function invalidateBrokenBookVotes(
 
   for (const badgeId of invalidatedBadgeIds) {
     await redis.hDel(userVotesKey(postId, userId), [badgeId]);
-    await redis.hDel(allVotesKey(postId, badgeId), [userId]);
     if (eligible) {
       await redis.hDel(votesKey(postId, badgeId), [userId]);
     }
   }
 
   return invalidatedBadgeIds;
-}
-
-async function recomputeAllBadgeConsensus(
-  postId: string,
-  postData: PostData,
-): Promise<Record<string, BadgeConsensus>> {
-  const allPlacements = getAllPlacements(postData);
-  const voteWindowOpen = isVoteWindowOpen(postData);
-  const consensusEntries = await Promise.all(
-    allPlacements.map(async ({ placement }) => {
-      const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
-      const computed = computeBadgeConsensus(allVotes);
-      if (
-        !voteWindowOpen &&
-        !computed.classification &&
-        computed.totalVotes > 0
-      ) {
-        computed.classification = iqmToClassification(
-          computed.iqm,
-          computed.voteCounts,
-          computed.totalVotes,
-        );
-      }
-      return [placement.id, computed] as const;
-    }),
-  );
-  const allConsensus: Record<string, BadgeConsensus> = {};
-  for (const [badgeId, computed] of consensusEntries) {
-    allConsensus[badgeId] = computed;
-  }
-  await clearConsensusCache(postId);
-  await writeConsensusCache(postId, voteWindowOpen, allConsensus);
-  return allConsensus;
-}
-
-async function recomputeEloAggregate(
-  postId: string,
-  postData: PostData,
-): Promise<{ consensusElo: number | null; voteCount: number }> {
-  const allEloVoters = await redis.hGetAll(eloVotersKey(postId));
-  const eloArr = Object.values(allEloVoters)
-    .map(Number)
-    .filter((value) => Number.isFinite(value));
-
-  if (eloArr.length > 0) {
-    await redis.set(eloVotesKey(postId), JSON.stringify(eloArr));
-  } else {
-    await redis.del(eloVotesKey(postId));
-  }
-
-  const voteCount = eloArr.length;
-  const consensusElo =
-    voteCount > 0 ? Math.round(interquartileMean(eloArr)) : null;
-
-  if (isVoteWindowOpen(postData)) {
-    if (voteCount > 0 && consensusElo !== null) {
-      await updatePostFlair(postId, consensusElo, voteCount, {
-        showVisibleElo: voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
-        colorize: false,
-        tryUserFlair: false,
-      });
-    } else {
-      await setPostNoVotesFlair(postId);
-    }
-  } else {
-    await redis.del(eloFinalizedKey(postId));
-    await redis.del(eloNoCountFlairAppliedKey(postId));
-    await finalizeEloIfTimedOut(postId, postData);
-  }
-
-  return { consensusElo, voteCount };
-}
-
-async function onInspectVotes(
-  req: IncomingMessage,
-): Promise<InspectVotesResponse> {
-  assertPrimarySubredditFeature();
-  await assertCurrentUserModerator();
-
-  const postId = getPostId();
-  const postData = await getPostData(postId);
-  const body = await readJSON<InspectVotesRequest>(req).catch(
-    () => ({ includeUsers: true } as InspectVotesRequest),
-  );
-  const shouldResolveUsers = body.includeUsers !== false;
-
-  const placements = getAllPlacements(postData).map(
-    ({ placement }) => placement,
-  );
-  const badgeIds = placements.map((placement) => placement.id);
-  const [countedBadgeVoteMaps, countedEloMap] = await Promise.all([
-    Promise.all(
-      badgeIds.map((badgeId) => redis.hGetAll(votesKey(postId, badgeId))),
-    ),
-    redis.hGetAll(eloVotersKey(postId)),
-  ]);
-
-  const allUserIds = new Set<string>();
-  for (const voteMap of countedBadgeVoteMaps) {
-    for (const userId of Object.keys(voteMap)) allUserIds.add(userId);
-  }
-  for (const userId of Object.keys(countedEloMap)) allUserIds.add(userId);
-
-  const resolvedUsers = shouldResolveUsers
-    ? await resolveUserSummaries([...allUserIds])
-    : new Map<string, Awaited<ReturnType<typeof resolveUserSummary>>>();
-
-  const badgeVotes: Record<string, InspectVotesResponse["badgeVotes"][string]> =
-    {};
-  for (let index = 0; index < badgeIds.length; index += 1) {
-    const badgeId = badgeIds[index]!;
-    const countedVotes = countedBadgeVoteMaps[index] ?? {};
-    badgeVotes[badgeId] = Object.entries(countedVotes)
-      .filter(([, vote]) => isValidBadgeVoteClassification(vote))
-      .map(([userId, vote]) => {
-        const summary = resolvedUsers.get(userId) ?? {
-          userId,
-          username: userId,
-          profileUrl: null,
-          totalKarma: null,
-          accountAgeDays: null,
-        };
-        return {
-          userId,
-          username: summary.username,
-          profileUrl: summary.profileUrl,
-          totalKarma: summary.totalKarma,
-          accountAgeDays: summary.accountAgeDays,
-          vote: vote as BadgeVoteOption,
-        };
-      })
-      .sort((a, b) => a.username.localeCompare(b.username));
-  }
-
-  const eloVotes = Object.entries(countedEloMap)
-    .map(([userId, rawElo]) => {
-      const summary = resolvedUsers.get(userId) ?? {
-        userId,
-        username: userId,
-        profileUrl: null,
-        totalKarma: null,
-        accountAgeDays: null,
-      };
-      const elo = Number(rawElo);
-      return {
-        userId,
-        username: summary.username,
-        profileUrl: summary.profileUrl,
-        totalKarma: summary.totalKarma,
-        accountAgeDays: summary.accountAgeDays,
-        elo,
-      };
-    })
-    .filter((entry) => Number.isFinite(entry.elo))
-    .sort((a, b) => a.username.localeCompare(b.username));
-
-  return {
-    type: "inspect-votes",
-    eloVotes,
-    badgeVotes,
-  };
-}
-
-async function onRemoveVote(req: IncomingMessage): Promise<RemoveVoteResponse> {
-  assertPrimarySubredditFeature();
-  await assertCurrentUserModerator();
-
-  const postId = getPostId();
-  const body = await readJSON<RemoveVoteRequest>(req);
-  const postData = await getPostData(postId);
-
-  if (body.target === "elo") {
-    await Promise.all([
-      redis.del(userEloKey(postId, body.userId)),
-      redis.hDel(eloVotersKey(postId), [body.userId]),
-    ]);
-    await recomputeEloAggregate(postId, postData);
-    return { type: "remove-vote", removed: true };
-  }
-
-  const allPlacements = getAllPlacements(postData);
-  const placementExists = allPlacements.some(
-    ({ placement }) => placement.id === body.badgeId,
-  );
-  if (!placementExists) {
-    throw { status: 404, message: "Badge not found" };
-  }
-
-  await Promise.all([
-    redis.hDel(userVotesKey(postId, body.userId), [body.badgeId]),
-    redis.hDel(allVotesKey(postId, body.badgeId), [body.userId]),
-    redis.hDel(votesKey(postId, body.badgeId), [body.userId]),
-  ]);
-
-  const eligible = await isEligibleVoter(postData, body.userId);
-  await invalidateBrokenBookVotes(postId, body.userId, postData, eligible);
-  await recomputeAllBadgeConsensus(postId, postData);
-
-  return { type: "remove-vote", removed: true };
 }
 
 // ============================
@@ -1947,19 +1463,32 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
   await redis.set(userEloKey(postId, userId), String(elo));
 
   // Only eligible votes are counted
-  const allEloVoters = await redis.hGetAll(eloVotersKey(postId));
+  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
   if (eligible) {
     allEloVoters[userId] = String(elo);
-    await redis.hSet(eloVotersKey(postId), { [userId]: String(elo) });
+    await redis.hSet(`tt:elovoters:${postId}`, { [userId]: String(elo) });
   }
-  const { consensusElo, voteCount } = await recomputeEloAggregate(
-    postId,
-    postData,
-  );
+
+  const eloArr = Object.values(allEloVoters).map(Number);
+  await redis.set(eloVotesKey(postId), JSON.stringify(eloArr));
+
+  const voteCount = eloArr.length;
+  const consensusElo =
+    voteCount > 0 ? Math.round(interquartileMean(eloArr)) : elo;
+
+  if (voteCount > 0 && isVoteWindowOpen(postData)) {
+    await updatePostFlair(postId, consensusElo, voteCount, {
+      showVisibleElo: voteCount >= MIN_VOTES_TO_SHOW_ELO_IN_POST_FLAIR,
+      colorize: false,
+      tryUserFlair: false,
+    });
+  }
+
+  await finalizeEloIfTimedOut(postId, postData);
 
   return {
     type: "vote-elo",
-    consensusElo: consensusElo ?? elo,
+    consensusElo,
     voteCount,
     counted: eligible,
     targetLabel: getEloTargetLabel(postData),
@@ -2069,31 +1598,55 @@ async function tryUpdateUserFlair(
   elo: number,
   voteCountAtTimeout: number,
 ): Promise<void> {
-  if (!isPrimarySubreddit()) return;
+  await applyAuthorEloFlair(postId, elo, voteCountAtTimeout, {
+    notifyUser: true,
+  });
+}
+
+type UserFlairApplyResult =
+  | "applied"
+  | "not-me-target"
+  | "no-subreddit"
+  | "no-author"
+  | "non-elo-user-flair"
+  | "not-higher"
+  | "failed";
+
+async function applyAuthorEloFlair(
+  postId: string,
+  elo: number,
+  voteCountAtTimeout: number,
+  options?: { notifyUser?: boolean; ignoreTargetRequirement?: boolean },
+): Promise<UserFlairApplyResult> {
+  if (!isPrimarySubreddit()) return "failed";
   try {
     const postData = await getPostData(postId);
     const isMeTarget =
       postData.eloSide === "me" || TITLE_ME_VOTE_REGEX.test(postData.title);
-    if (!isMeTarget) return;
+    if (!options?.ignoreTargetRequirement && !isMeTarget) {
+      return "not-me-target";
+    }
 
     const subredditName = context.subredditName;
-    if (!subredditName) return;
+    if (!subredditName) return "no-subreddit";
 
     const author = await reddit.getUserById(
       postData.creatorId as `t2_${string}`,
     );
-    if (!author) return;
+    if (!author) return "no-author";
 
     const postAuthorFlair = await author.getUserFlairBySubreddit(subredditName);
     const eloUserFlairMatch = postAuthorFlair?.flairText?.match(ELO_REGEX);
-    if (postAuthorFlair?.flairText && !eloUserFlairMatch) return;
+    if (postAuthorFlair?.flairText && !eloUserFlairMatch) {
+      return "non-elo-user-flair";
+    }
     let curUserElo: number | undefined;
     if (eloUserFlairMatch?.[1]) curUserElo = parseInt(eloUserFlairMatch[1], 10);
 
-    if (curUserElo && elo <= curUserElo) return;
+    if (curUserElo && elo <= curUserElo) return "not-higher";
 
     const titleEmoji = getTitleEmoji(elo);
-    const flairText = `${titleEmoji}${elo} Elo`;
+    const flairText = `${titleEmoji} ${elo} Elo`;
 
     await reddit.setUserFlair({
       subredditName,
@@ -2103,18 +1656,23 @@ async function tryUpdateUserFlair(
       textColor: "light",
     });
 
-    const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
-    const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
-    const formattedVoteCount = voteCountAtTimeout.toLocaleString("en-US");
-    await reddit.sendPrivateMessage({
-      subject: `Your user flair on r/${subredditName} has been updated`,
-      text: `Your [post](${postUrl}) on r/${subredditName} has closed voting after 24 hours with ${formattedVoteCount} Elo ${
-        voteCountAtTimeout === 1 ? "vote" : "votes"
-      }. Final consensus is **${elo} Elo**, and your user flair has been updated automatically. You can clear or change your flair at any time from subreddit flair settings.`,
-      to: author.username,
-    });
+    if (options?.notifyUser) {
+      const shortPostId = postId.startsWith("t3_") ? postId.slice(3) : postId;
+      const postUrl = `https://www.reddit.com/r/${subredditName}/comments/${shortPostId}/`;
+      const formattedVoteCount = voteCountAtTimeout.toLocaleString("en-US");
+      await reddit.sendPrivateMessage({
+        subject: `Your user flair on r/${subredditName} has been updated`,
+        text: `Your [post](${postUrl}) on r/${subredditName} has closed voting after 24 hours with ${formattedVoteCount} Elo ${
+          voteCountAtTimeout === 1 ? "vote" : "votes"
+        }. Final consensus is **${elo} Elo**, and your user flair has been updated automatically. You can clear your flair at any time on the subreddit.`,
+        to: author.username,
+      });
+    }
+
+    return "applied";
   } catch (err) {
     console.error("Failed to update user flair:", err);
+    return "failed";
   }
 }
 

@@ -17,6 +17,12 @@
         "endpoint": "/internal/menu/mod-estimate-storage"
       },
       {
+        "label": "Apply Post Elo Flair",
+        "forUserType": "moderator",
+        "location": "post",
+        "endpoint": "/internal/menu/mod-apply-post-elo-flair"
+      },
+      {
         "label": "Reply With Classification Image",
         "forUserType": "user",
         "location": "comment",

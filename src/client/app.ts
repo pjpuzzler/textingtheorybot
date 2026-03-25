@@ -54,7 +54,11 @@ const ANNOTATED_MIN_RADIUS = 2.7;
 const ANNOTATED_MAX_RADIUS = 5.8;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
-const PAGE_SLIDE_DURATION_MS = 150;
+const PAGE_SLIDE_DURATION_MS = 210;
+const SWIPE_COMMIT_MIN_PX = 48;
+const SWIPE_COMMIT_RATIO = 0.16;
+const SWIPE_SETTLE_DURATION_MS = 215;
+const SWIPE_RESET_DURATION_MS = 260;
 const MIN_CROP_SIZE_PCT = 8;
 const EDITOR_PICKER_BACKDROP_GUARD_MS = 180;
 const CROP_BACKDROP_GUARD_MS = 1000;
@@ -102,10 +106,32 @@ let pendingCreateSlideBadges: {
   badgesWidth: string;
   badgesHeight: string;
 } | null = null;
+let pendingCreateSlideRedact: HTMLCanvasElement | null = null;
 let navTransitionInFlight = false;
 let queuedNavIndex: number | null = null;
 let isEditSession = false;
 let editorLayoutRaf: number | null = null;
+let editorSwipeTracking = false;
+let editorSwipeHorizontal = false;
+let editorSwipeStartX = 0;
+let editorSwipeStartY = 0;
+let editorSwipeLastDx = 0;
+let editorSwipeStartedNearEdge = false;
+let editorSwipeStartedDuringTransition = false;
+let editorSwipePreviewIndex: number | null = null;
+let editorSwipePreviewImg: HTMLImageElement | null = null;
+let editorSwipePreviewBadges: HTMLDivElement | null = null;
+let editorSwipePreviewRedact: HTMLCanvasElement | null = null;
+let committedEditorPreviewImg: HTMLImageElement | null = null;
+let committedEditorPreviewBadges: HTMLDivElement | null = null;
+let committedEditorPreviewRedact: HTMLCanvasElement | null = null;
+let editorSwipeTransformRaf: number | null = null;
+let pendingEditorActiveSwipeDx = 0;
+let pendingEditorPreviewSwipeDx: number | null = null;
+let pendingEditorNavTransitionTimeout: number | null = null;
+let pendingEditorNavTransitionFinalizer: (() => void) | null = null;
+let editorSwipeInputMode: "touch" | "pointer" | null = null;
+let editorSwipePointerId: number | null = null;
 
 function scheduleEditorLayoutRefresh(): void {
   if (editorLayoutRaf !== null) return;
@@ -425,6 +451,128 @@ function clampGlobalRadius(value: number): number {
   const min = sliderMinForMode();
   const max = sliderMaxForMode();
   return Math.min(max, Math.max(min, value));
+}
+
+function isTouchPrimaryInput(): boolean {
+  const userAgent =
+    typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  return (
+    /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches)
+  );
+}
+
+function isAndroidLike(): boolean {
+  const userAgent =
+    typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  return /Android|Linux; arm|Linux; aarch64/i.test(userAgent);
+}
+
+function translateXPx(px: number): string {
+  return `translate3d(${px.toFixed(2)}px, 0, 0)`;
+}
+
+function cancelEditorSwipeTransformFrame(): void {
+  if (editorSwipeTransformRaf !== null) {
+    window.cancelAnimationFrame(editorSwipeTransformRaf);
+    editorSwipeTransformRaf = null;
+  }
+}
+
+function flushEditorSwipeTransforms(): void {
+  editorSwipeTransformRaf = null;
+  const activeTransform = translateXPx(pendingEditorActiveSwipeDx);
+  cmImg.style.transform = activeTransform;
+  cmBadges.style.transform = activeTransform;
+  cmRedactLayer.style.transform = activeTransform;
+
+  if (editorSwipePreviewImg && pendingEditorPreviewSwipeDx !== null) {
+    editorSwipePreviewImg.style.transform = translateXPx(
+      pendingEditorPreviewSwipeDx,
+    );
+  }
+  if (editorSwipePreviewBadges && pendingEditorPreviewSwipeDx !== null) {
+    editorSwipePreviewBadges.style.transform = translateXPx(
+      pendingEditorPreviewSwipeDx,
+    );
+  }
+  if (editorSwipePreviewRedact && pendingEditorPreviewSwipeDx !== null) {
+    editorSwipePreviewRedact.style.transform = translateXPx(
+      pendingEditorPreviewSwipeDx,
+    );
+  }
+}
+
+function scheduleEditorSwipeTransforms(
+  activeDx: number,
+  previewDx: number | null,
+): void {
+  pendingEditorActiveSwipeDx = activeDx;
+  pendingEditorPreviewSwipeDx = previewDx;
+  if (editorSwipeTransformRaf !== null) return;
+  editorSwipeTransformRaf = window.requestAnimationFrame(
+    flushEditorSwipeTransforms,
+  );
+}
+
+function clearEditorSwipePreview(): void {
+  pendingEditorPreviewSwipeDx = null;
+  editorSwipePreviewImg?.remove();
+  editorSwipePreviewBadges?.remove();
+  editorSwipePreviewRedact?.remove();
+  editorSwipePreviewImg = null;
+  editorSwipePreviewBadges = null;
+  editorSwipePreviewRedact = null;
+  editorSwipePreviewIndex = null;
+}
+
+function clearEditorDragTransform(): void {
+  cancelEditorSwipeTransformFrame();
+  cmCanvasWrap.classList.remove("is-dragging");
+  cmImg.style.transition = "";
+  cmBadges.style.transition = "";
+  cmRedactLayer.style.transition = "";
+  cmImg.style.transform = "";
+  cmBadges.style.transform = "";
+  cmRedactLayer.style.transform = "";
+}
+
+function finalizeEditorCommittedPreview(immediate = false): void {
+  if (
+    !committedEditorPreviewImg &&
+    !committedEditorPreviewBadges &&
+    !committedEditorPreviewRedact
+  ) {
+    return;
+  }
+  cancelEditorSwipeTransformFrame();
+  cmImg.style.transform = "";
+  cmBadges.style.transform = "";
+  cmRedactLayer.style.transform = "";
+  committedEditorPreviewImg?.remove();
+  committedEditorPreviewBadges?.remove();
+  committedEditorPreviewRedact?.remove();
+  committedEditorPreviewImg = null;
+  committedEditorPreviewBadges = null;
+  committedEditorPreviewRedact = null;
+  render();
+  if (immediate) {
+    cmImg.style.transition = "";
+    cmBadges.style.transition = "";
+    cmRedactLayer.style.transition = "";
+    completeNavigationTransition();
+    return;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      cmImg.style.transition = "";
+      cmBadges.style.transition = "";
+      cmRedactLayer.style.transition = "";
+      completeNavigationTransition();
+    });
+  });
 }
 
 function resetPerImageRadiusState(): void {
@@ -986,6 +1134,7 @@ function advanceCreateCropFlow(): void {
   imageSlideDirection = null;
   pendingCreateSlideImageSrc = null;
   pendingCreateSlideBadges = null;
+  pendingCreateSlideRedact = null;
   navTransitionInFlight = false;
   queuedNavIndex = null;
   cmImg.src = "";
@@ -1127,6 +1276,8 @@ cmTitle.addEventListener("input", () => {
 
 function openEditor() {
   applySliderBoundsForMode();
+  clearEditorSwipePreview();
+  clearEditorDragTransform();
   updateOrderControlsVisibility();
   globalRadius = Number(cmSize.value) || globalRadius;
   lastUsedRadius = clampGlobalRadius(globalRadius);
@@ -1153,10 +1304,7 @@ function openEditor() {
   updateSideUI();
   loadActiveImage(false);
   scheduleEditorLayoutRefresh();
-  window.requestAnimationFrame(() => scheduleEditorLayoutRefresh());
-  window.setTimeout(() => scheduleEditorLayoutRefresh(), 120);
-  window.setTimeout(() => restoreEditorInteractivity(), 0);
-  window.requestAnimationFrame(() => restoreEditorInteractivity());
+  restoreEditorInteractivity();
 }
 
 function updateMarkerToggleUI(): void {
@@ -1170,18 +1318,30 @@ function updateMarkerToggleUI(): void {
 
 function updateImageNav() {
   const hasMultiple = images.length > 1;
+  const hideArrowsForSwipe =
+    hasMultiple && isTouchPrimaryInput() && !isAndroidLike();
   cmImageNav.style.display = hasMultiple ? "flex" : "none";
   cmPageChip.style.display = hasMultiple ? "block" : "none";
   cmPageChip.textContent = `${activeImageIndex + 1}/${images.length}`;
   cmImgDots.innerHTML = "";
+  const dotsFragment = document.createDocumentFragment();
   for (let index = 0; index < images.length; index++) {
     const dot = document.createElement("div");
     dot.className = "img-dot";
     if (index === activeImageIndex) dot.classList.add("active");
-    cmImgDots.appendChild(dot);
+    dotsFragment.appendChild(dot);
   }
-  cmImgPrev.style.display = hasMultiple ? "inline-flex" : "none";
-  cmImgNext.style.display = hasMultiple ? "inline-flex" : "none";
+  cmImgDots.appendChild(dotsFragment);
+  cmImgPrev.style.display = hideArrowsForSwipe
+    ? "none"
+    : hasMultiple
+    ? "inline-flex"
+    : "none";
+  cmImgNext.style.display = hideArrowsForSwipe
+    ? "none"
+    : hasMultiple
+    ? "inline-flex"
+    : "none";
   cmImgPrev.disabled = !hasMultiple || activeImageIndex <= 0;
   cmImgNext.disabled = !hasMultiple || activeImageIndex >= images.length - 1;
 }
@@ -1256,6 +1416,657 @@ cmImgNext.addEventListener("click", () => {
   navigateToImage(activeImageIndex + 1);
 });
 
+function canSwipeEditorCanvas(target: EventTarget | null): boolean {
+  if (!isTouchPrimaryInput() || images.length <= 1 || markerModeEnabled) {
+    return false;
+  }
+  const el = target as HTMLElement | null;
+  if (!el) return true;
+  return !(
+    el.closest(".ed-badge") ||
+    el.closest(".image-nav") ||
+    el.closest("#cm-marker-toggle") ||
+    el.closest("#cm-crop")
+  );
+}
+
+function resetEditorSwipe(): void {
+  editorSwipeTracking = false;
+  editorSwipeHorizontal = false;
+  editorSwipeLastDx = 0;
+  editorSwipeStartedNearEdge = false;
+  editorSwipeStartedDuringTransition = false;
+  editorSwipeInputMode = null;
+  editorSwipePointerId = null;
+}
+
+function renderStaticPlacementsInto(
+  container: HTMLDivElement,
+  image: EditorImage,
+  scaleBase: number,
+): void {
+  container.innerHTML = "";
+  image.placements.forEach((placement, index) => {
+    const el = document.createElement("div");
+    el.className =
+      mode === "vote" ? "ed-badge ed-badge--vote" : "ed-badge ed-badge--ann";
+
+    if (mode === "annotated" && placement.classification) {
+      el.style.backgroundImage = `url(/assets/badges/${placement.classification.toLowerCase()}.png)`;
+    }
+
+    const sizePx =
+      (((placement.radius || globalRadius) * 2) / 100) * scaleBase;
+    el.style.width = `${sizePx}px`;
+    el.style.height = `${sizePx}px`;
+    el.style.left = `${placement.x}%`;
+    el.style.top = `${placement.y}%`;
+
+    const miniSize = Math.max(12, sizePx * 0.44);
+    el.style.setProperty("--mini-size", `${miniSize}px`);
+    el.style.setProperty(
+      "--mini-del-size",
+      `${Math.max(15, miniSize * 1.22)}px`,
+    );
+    el.style.setProperty(
+      "--mini-del-font-size",
+      `${Math.max(10, Math.round(miniSize * 0.74))}px`,
+    );
+
+    if (mode === "vote") {
+      const num = document.createElement("div");
+      num.className = "ed-num";
+      num.style.fontSize = `${Math.max(9.5, Math.max(12, sizePx * 0.44) * 0.68)}px`;
+      num.textContent = String((placement.order ?? index) + 1);
+      el.appendChild(num);
+    }
+
+    container.appendChild(el);
+  });
+}
+
+function paintRedactionsLayer(
+  layer: HTMLCanvasElement,
+  rect: ReturnType<typeof canvasRect>,
+  redactions: RedactionStroke[],
+): void {
+  layer.style.left = `${rect.x}px`;
+  layer.style.top = `${rect.y}px`;
+  layer.style.width = `${rect.w}px`;
+  layer.style.height = `${rect.h}px`;
+
+  const drawW = Math.max(1, Math.round(rect.w));
+  const drawH = Math.max(1, Math.round(rect.h));
+  if (layer.width !== drawW) layer.width = drawW;
+  if (layer.height !== drawH) layer.height = drawH;
+
+  const ctx = layer.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, layer.width, layer.height);
+  drawRedactionsOnContext(ctx, redactions, layer.width, layer.height);
+}
+
+function cloneCurrentRedactionLayer(): HTMLCanvasElement | null {
+  if (cmRedactLayer.width <= 0 || cmRedactLayer.height <= 0) return null;
+  const clone = document.createElement("canvas");
+  clone.className = "cm-redact-layer";
+  clone.width = cmRedactLayer.width;
+  clone.height = cmRedactLayer.height;
+  clone.style.left = cmRedactLayer.style.left;
+  clone.style.top = cmRedactLayer.style.top;
+  clone.style.width = cmRedactLayer.style.width;
+  clone.style.height = cmRedactLayer.style.height;
+  const ctx = clone.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(cmRedactLayer, 0, 0);
+  return clone;
+}
+
+function ensureEditorSwipePreview(targetIndex: number, dx: number): boolean {
+  const image = images[targetIndex];
+  if (!image) {
+    clearEditorSwipePreview();
+    return false;
+  }
+
+  if (
+    editorSwipePreviewIndex !== targetIndex ||
+    !editorSwipePreviewImg ||
+    !editorSwipePreviewBadges ||
+    !editorSwipePreviewRedact
+  ) {
+    clearEditorSwipePreview();
+    const rect = canvasRectForImage(image);
+    if (rect.w <= 0 || rect.h <= 0) return false;
+    const scaleBase = Math.max(rect.imgW, rect.imgH);
+
+    editorSwipePreviewIndex = targetIndex;
+
+    editorSwipePreviewImg = document.createElement("img");
+    editorSwipePreviewImg.className = "cm-img";
+    editorSwipePreviewImg.src = image.dataUrl;
+    editorSwipePreviewImg.style.position = "absolute";
+    editorSwipePreviewImg.style.inset = "0";
+    editorSwipePreviewImg.style.zIndex = "1";
+    editorSwipePreviewImg.style.pointerEvents = "none";
+
+    editorSwipePreviewRedact = document.createElement("canvas");
+    editorSwipePreviewRedact.className = "cm-redact-layer";
+    editorSwipePreviewRedact.style.zIndex = "2";
+    editorSwipePreviewRedact.style.pointerEvents = "none";
+    paintRedactionsLayer(editorSwipePreviewRedact, rect, image.redactions);
+
+    editorSwipePreviewBadges = document.createElement("div");
+    editorSwipePreviewBadges.className = "cm-badges";
+    editorSwipePreviewBadges.style.left = `${rect.x}px`;
+    editorSwipePreviewBadges.style.top = `${rect.y}px`;
+    editorSwipePreviewBadges.style.width = `${rect.w}px`;
+    editorSwipePreviewBadges.style.height = `${rect.h}px`;
+    editorSwipePreviewBadges.style.zIndex = "3";
+    editorSwipePreviewBadges.style.pointerEvents = "none";
+    renderStaticPlacementsInto(editorSwipePreviewBadges, image, scaleBase);
+
+    cmCanvasWrap.appendChild(editorSwipePreviewImg);
+    cmCanvasWrap.appendChild(editorSwipePreviewRedact);
+    cmCanvasWrap.appendChild(editorSwipePreviewBadges);
+  }
+
+  const travelPx = Math.max(
+    1,
+    cmCanvasWrap.clientWidth || cmCanvasWrap.getBoundingClientRect().width || 1,
+  );
+  const baseOffset = targetIndex > activeImageIndex ? travelPx : -travelPx;
+  const previewX = baseOffset + dx;
+
+  if (editorSwipePreviewImg) {
+    editorSwipePreviewImg.style.transition = "none";
+    editorSwipePreviewImg.style.transform = translateXPx(previewX);
+  }
+  if (editorSwipePreviewBadges) {
+    editorSwipePreviewBadges.style.transition = "none";
+    editorSwipePreviewBadges.style.transform = translateXPx(previewX);
+  }
+  if (editorSwipePreviewRedact) {
+    editorSwipePreviewRedact.style.transition = "none";
+    editorSwipePreviewRedact.style.transform = translateXPx(previewX);
+  }
+  scheduleEditorSwipeTransforms(dx, previewX);
+  return true;
+}
+
+function animateEditorSwipeReset(): void {
+  cancelEditorSwipeTransformFrame();
+  cmCanvasWrap.classList.remove("is-dragging");
+  const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
+  cmImg.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  cmBadges.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  cmRedactLayer.style.transition = `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  cmImg.style.transform = translateXPx(0);
+  cmBadges.style.transform = translateXPx(0);
+  cmRedactLayer.style.transform = translateXPx(0);
+  if (editorSwipePreviewImg) {
+    editorSwipePreviewImg.style.transition =
+      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  }
+  if (editorSwipePreviewBadges) {
+    editorSwipePreviewBadges.style.transition =
+      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  }
+  if (editorSwipePreviewRedact) {
+    editorSwipePreviewRedact.style.transition =
+      `transform ${SWIPE_RESET_DURATION_MS}ms ${easing}`;
+  }
+  window.setTimeout(() => {
+    clearEditorSwipePreview();
+    clearEditorDragTransform();
+  }, SWIPE_RESET_DURATION_MS + 40);
+}
+
+function applyEditorImageIndexImmediately(
+  nextIndex: number,
+  immediateTransitionCompletion = false,
+): void {
+  clearPendingEditorNavTransition();
+  const image = images[nextIndex];
+  if (!image) return;
+  const hadCommittedPreview =
+    !!committedEditorPreviewImg ||
+    !!committedEditorPreviewBadges ||
+    !!committedEditorPreviewRedact;
+  activeImageIndex = nextIndex;
+  imageSlideDirection = null;
+  pendingCreateSlideImageSrc = null;
+  pendingCreateSlideBadges = null;
+  pendingCreateSlideRedact = null;
+  clearEditorSwipePreview();
+  finalizeEditorCommittedPreview(immediateTransitionCompletion);
+  clearEditorDragTransform();
+  cmImg.src = image.dataUrl;
+  syncSliderForActiveImage();
+  updateImageNav();
+  render();
+  if (navTransitionInFlight && (!hadCommittedPreview || immediateTransitionCompletion)) {
+    completeNavigationTransition();
+  }
+}
+
+function commitEditorSwipeNavigation(nextIndex: number): void {
+  const image = images[nextIndex];
+  if (!image) return;
+
+  const previewImg = editorSwipePreviewImg;
+  const previewBadges = editorSwipePreviewBadges;
+  const previewRedact = editorSwipePreviewRedact;
+
+  activeImageIndex = nextIndex;
+  imageSlideDirection = null;
+  pendingCreateSlideImageSrc = null;
+  pendingCreateSlideBadges = null;
+  pendingCreateSlideRedact = null;
+  cmCanvasWrap.classList.remove("is-dragging");
+  cmImg.style.transition = "none";
+  cmBadges.style.transition = "none";
+  cmRedactLayer.style.transition = "none";
+  cmImg.style.transform = translateXPx(0);
+  cmBadges.style.transform = translateXPx(0);
+  cmRedactLayer.style.transform = translateXPx(0);
+  committedEditorPreviewImg = previewImg;
+  committedEditorPreviewBadges = previewBadges;
+  committedEditorPreviewRedact = previewRedact;
+  cmImg.src = previewImg?.currentSrc || previewImg?.src || image.dataUrl;
+  if (previewBadges) {
+    cmBadges.style.left = previewBadges.style.left;
+    cmBadges.style.top = previewBadges.style.top;
+    cmBadges.style.width = previewBadges.style.width;
+    cmBadges.style.height = previewBadges.style.height;
+    cmBadges.innerHTML = previewBadges.innerHTML;
+  }
+  if (previewRedact) {
+    cmRedactLayer.style.left = previewRedact.style.left;
+    cmRedactLayer.style.top = previewRedact.style.top;
+    cmRedactLayer.style.width = previewRedact.style.width;
+    cmRedactLayer.style.height = previewRedact.style.height;
+    cmRedactLayer.width = previewRedact.width;
+    cmRedactLayer.height = previewRedact.height;
+    const ctx = cmRedactLayer.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, cmRedactLayer.width, cmRedactLayer.height);
+      ctx.drawImage(previewRedact, 0, 0);
+    }
+  }
+  syncSliderForActiveImage();
+  updateImageNav();
+  editorSwipePreviewImg = null;
+  editorSwipePreviewBadges = null;
+  editorSwipePreviewRedact = null;
+  editorSwipePreviewIndex = null;
+  if (cmImg.complete && cmImg.naturalWidth > 0) {
+    requestAnimationFrame(() => {
+      finalizeEditorCommittedPreview();
+    });
+  } else {
+    window.setTimeout(() => {
+      finalizeEditorCommittedPreview();
+    }, 260);
+  }
+}
+
+function clearPendingEditorNavTransition(): void {
+  if (pendingEditorNavTransitionTimeout !== null) {
+    window.clearTimeout(pendingEditorNavTransitionTimeout);
+    pendingEditorNavTransitionTimeout = null;
+  }
+  pendingEditorNavTransitionFinalizer = null;
+}
+
+function schedulePendingEditorNavTransition(
+  finalizer: () => void,
+  delayMs: number,
+): void {
+  clearPendingEditorNavTransition();
+  pendingEditorNavTransitionFinalizer = finalizer;
+  pendingEditorNavTransitionTimeout = window.setTimeout(() => {
+    const nextFinalizer = pendingEditorNavTransitionFinalizer;
+    clearPendingEditorNavTransition();
+    nextFinalizer?.();
+  }, delayMs);
+}
+
+function interruptEditorSwipeNavigationTransition(): void {
+  if (!navTransitionInFlight) return;
+  queuedNavIndex = null;
+  clearPendingEditorNavTransition();
+  applyEditorImageIndexImmediately(activeImageIndex, true);
+}
+
+function finishEditorSwipeNavigation(nextIndex: number, dx: number): void {
+  if (
+    !editorSwipePreviewImg ||
+    !editorSwipePreviewBadges ||
+    !editorSwipePreviewRedact
+  ) {
+    applyEditorImageIndexImmediately(nextIndex);
+    return;
+  }
+  navTransitionInFlight = true;
+  activeImageIndex = nextIndex;
+  cancelEditorSwipeTransformFrame();
+  const travelPx = Math.max(
+    1,
+    cmCanvasWrap.clientWidth || cmCanvasWrap.getBoundingClientRect().width || 1,
+  );
+  const outgoingToX = dx < 0 ? -travelPx : travelPx;
+  const easing = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+  cmImg.style.transition = `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  cmBadges.style.transition =
+    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  cmRedactLayer.style.transition =
+    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewImg.style.transition =
+    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewBadges.style.transition =
+    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+  editorSwipePreviewRedact.style.transition =
+    `transform ${SWIPE_SETTLE_DURATION_MS}ms ${easing}`;
+
+  requestAnimationFrame(() => {
+    cmImg.style.transform = translateXPx(outgoingToX);
+    cmBadges.style.transform = translateXPx(outgoingToX);
+    cmRedactLayer.style.transform = translateXPx(outgoingToX);
+    editorSwipePreviewImg!.style.transform = translateXPx(0);
+    editorSwipePreviewBadges!.style.transform = translateXPx(0);
+    editorSwipePreviewRedact!.style.transform = translateXPx(0);
+  });
+
+  schedulePendingEditorNavTransition(() => {
+    commitEditorSwipeNavigation(nextIndex);
+  }, SWIPE_SETTLE_DURATION_MS + 20);
+}
+
+function beginEditorSwipe(
+  clientX: number,
+  clientY: number,
+  nearEdge: boolean,
+): void {
+  interruptEditorSwipeNavigationTransition();
+  editorSwipeStartedNearEdge = nearEdge;
+  editorSwipeStartedDuringTransition = navTransitionInFlight;
+  editorSwipeTracking = true;
+  editorSwipeHorizontal = false;
+  editorSwipeLastDx = 0;
+  editorSwipeStartX = clientX;
+  editorSwipeStartY = clientY;
+}
+
+function updateEditorSwipe(clientX: number, clientY: number): boolean {
+  if (!editorSwipeTracking) return false;
+  const dx = clientX - editorSwipeStartX;
+  const dy = clientY - editorSwipeStartY;
+  const androidLike = isAndroidLike();
+
+  if (!editorSwipeHorizontal) {
+    const lockDistance = editorSwipeStartedNearEdge
+      ? androidLike
+        ? 3
+        : 4
+      : androidLike
+      ? 5
+      : 6;
+    if (Math.abs(dx) < lockDistance && Math.abs(dy) < lockDistance) {
+      return false;
+    }
+    if (Math.abs(dx) <= Math.abs(dy) * (androidLike ? 1.08 : 0.95)) {
+      resetEditorSwipe();
+      return false;
+    }
+    editorSwipeHorizontal = true;
+  }
+
+  const wantsNext = dx < 0;
+  const targetIndex = activeImageIndex + (wantsNext ? 1 : -1);
+  const canNavigate = targetIndex >= 0 && targetIndex < images.length;
+  const adjustedDx = Math.round(canNavigate ? dx : dx * 0.16);
+  editorSwipeLastDx = adjustedDx;
+
+  if (editorSwipeStartedDuringTransition) {
+    return true;
+  }
+
+  cmCanvasWrap.classList.add("is-dragging");
+  cmImg.style.transition = "none";
+  cmBadges.style.transition = "none";
+  cmRedactLayer.style.transition = "none";
+  if (canNavigate) {
+    ensureEditorSwipePreview(targetIndex, adjustedDx);
+  } else {
+    clearEditorSwipePreview();
+    scheduleEditorSwipeTransforms(adjustedDx, null);
+  }
+  return true;
+}
+
+function endEditorSwipe(clientX: number, clientY: number): void {
+  if (!editorSwipeTracking) return;
+  const dx = editorSwipeLastDx || clientX - editorSwipeStartX;
+  const wasHorizontal = editorSwipeHorizontal;
+  const startedDuringTransition = editorSwipeStartedDuringTransition;
+  resetEditorSwipe();
+  if (!wasHorizontal) {
+    clearEditorSwipePreview();
+    clearEditorDragTransform();
+    return;
+  }
+
+  const nextIndex = activeImageIndex + (dx < 0 ? 1 : -1);
+  const canNavigate = nextIndex >= 0 && nextIndex < images.length;
+  const commitThreshold = Math.min(
+    84,
+    Math.max(
+      SWIPE_COMMIT_MIN_PX,
+      Math.round(
+        (cmCanvasWrap.clientWidth || cmCanvasWrap.getBoundingClientRect().width || 0) *
+          SWIPE_COMMIT_RATIO,
+      ),
+    ),
+  );
+  const shouldCommit = canNavigate && Math.abs(dx) >= commitThreshold;
+
+  if (startedDuringTransition) {
+    if (shouldCommit) {
+      queuedNavIndex = nextIndex;
+    }
+    return;
+  }
+
+  if (
+    shouldCommit &&
+    editorSwipePreviewIndex === nextIndex &&
+    editorSwipePreviewImg &&
+    editorSwipePreviewBadges &&
+    editorSwipePreviewRedact
+  ) {
+    finishEditorSwipeNavigation(nextIndex, dx);
+    return;
+  }
+  clearEditorSwipePreview();
+  animateEditorSwipeReset();
+}
+
+function cancelEditorSwipeGesture(): void {
+  const startedDuringTransition = editorSwipeStartedDuringTransition;
+  resetEditorSwipe();
+  if (startedDuringTransition) {
+    return;
+  }
+  clearEditorSwipePreview();
+  animateEditorSwipeReset();
+}
+
+cmCanvasWrap.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!isTouchPrimaryInput()) return;
+    if (editorSwipeInputMode && editorSwipeInputMode !== "touch") return;
+    if (!canSwipeEditorCanvas(event.target)) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    editorSwipeInputMode = "touch";
+    const edgeGuardPx = isAndroidLike() ? 96 : 64;
+    const nearEdge =
+      touch.clientX <= edgeGuardPx ||
+      touch.clientX >= window.innerWidth - edgeGuardPx;
+    beginEditorSwipe(touch.clientX, touch.clientY, nearEdge);
+    if (isAndroidLike() || nearEdge) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  },
+  { passive: false },
+);
+
+cmCanvasWrap.addEventListener(
+  "touchmove",
+  (event) => {
+    if (editorSwipeInputMode !== "touch") return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    if (!updateEditorSwipe(touch.clientX, touch.clientY)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  },
+  { passive: false },
+);
+
+cmCanvasWrap.addEventListener(
+  "touchend",
+  (event) => {
+    if (editorSwipeInputMode !== "touch") return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    endEditorSwipe(touch.clientX, touch.clientY);
+  },
+  { passive: false },
+);
+
+cmCanvasWrap.addEventListener(
+  "touchcancel",
+  () => {
+    if (editorSwipeInputMode !== "touch") return;
+    cancelEditorSwipeGesture();
+  },
+  { passive: true },
+);
+
+cmCanvasWrap.addEventListener("pointerdown", (event) => {
+  if (!isTouchPrimaryInput()) return;
+  if (editorSwipeInputMode && editorSwipeInputMode !== "pointer") return;
+  if (!canSwipeEditorCanvas(event.target)) return;
+  if (event.button !== 0) return;
+  editorSwipeInputMode = "pointer";
+  editorSwipePointerId = event.pointerId;
+  const edgeGuardPx = isAndroidLike() ? 96 : 64;
+  const nearEdge =
+    event.clientX <= edgeGuardPx ||
+    event.clientX >= window.innerWidth - edgeGuardPx;
+  beginEditorSwipe(event.clientX, event.clientY, nearEdge);
+  try {
+    cmCanvasWrap.setPointerCapture(event.pointerId);
+  } catch {}
+  if (isAndroidLike() || nearEdge) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+});
+
+cmCanvasWrap.addEventListener("pointermove", (event) => {
+  if (
+    editorSwipeInputMode !== "pointer" ||
+    editorSwipePointerId !== event.pointerId
+  ) {
+    return;
+  }
+  if (!updateEditorSwipe(event.clientX, event.clientY)) return;
+  event.preventDefault();
+  event.stopPropagation();
+});
+
+cmCanvasWrap.addEventListener("pointerup", (event) => {
+  if (
+    editorSwipeInputMode !== "pointer" ||
+    editorSwipePointerId !== event.pointerId
+  ) {
+    return;
+  }
+  endEditorSwipe(event.clientX, event.clientY);
+  try {
+    cmCanvasWrap.releasePointerCapture(event.pointerId);
+  } catch {}
+});
+
+cmCanvasWrap.addEventListener("pointercancel", (event) => {
+  if (
+    editorSwipeInputMode !== "pointer" ||
+    editorSwipePointerId !== event.pointerId
+  ) {
+    return;
+  }
+  cancelEditorSwipeGesture();
+  try {
+    cmCanvasWrap.releasePointerCapture(event.pointerId);
+  } catch {}
+});
+
+document.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!isTouchPrimaryInput() || images.length <= 1 || markerModeEnabled) {
+      return;
+    }
+    const touch = event.touches[0];
+    if (!touch) return;
+    const rect = cmCanvasWrap.getBoundingClientRect();
+    if (
+      touch.clientX < rect.left ||
+      touch.clientX > rect.right ||
+      touch.clientY < rect.top ||
+      touch.clientY > rect.bottom
+    ) {
+      return;
+    }
+    const target = event.target as HTMLElement;
+    if (!canSwipeEditorCanvas(target)) {
+      return;
+    }
+    if (touch.clientX <= 64 || touch.clientX >= window.innerWidth - 64) {
+      event.preventDefault();
+    }
+  },
+  { passive: false, capture: true },
+);
+
+document.addEventListener(
+  "touchmove",
+  (event) => {
+    if (
+      !editorSwipeTracking ||
+      (!editorSwipeHorizontal && !editorSwipeStartedNearEdge)
+    ) {
+      return;
+    }
+    event.preventDefault();
+  },
+  { passive: false, capture: true },
+);
+
+document.addEventListener(
+  "touchend",
+  () => {
+    editorSwipeStartedNearEdge = false;
+  },
+  { passive: true, capture: true },
+);
+
 function navigateToImage(nextIndex: number): void {
   if (
     nextIndex < 0 ||
@@ -1271,8 +2082,13 @@ function navigateToImage(nextIndex: number): void {
 }
 
 function startNavigationTo(nextIndex: number): void {
+  clearPendingEditorNavTransition();
+  clearEditorSwipePreview();
+  finalizeEditorCommittedPreview();
+  clearEditorDragTransform();
   navTransitionInFlight = true;
   pendingCreateSlideImageSrc = cmImg.currentSrc || cmImg.src || null;
+  pendingCreateSlideRedact = cloneCurrentRedactionLayer();
   pendingCreateSlideBadges = {
     badgesHtml: cmBadges.innerHTML,
     badgesLeft: cmBadges.style.left,
@@ -1287,6 +2103,7 @@ function startNavigationTo(nextIndex: number): void {
 }
 
 function completeNavigationTransition(): void {
+  clearPendingEditorNavTransition();
   navTransitionInFlight = false;
   const queued = queuedNavIndex;
   queuedNavIndex = null;
@@ -1305,8 +2122,10 @@ function loadActiveImage(animate = true) {
   const directionForAnimation = imageSlideDirection;
   const outgoingImageSrc = pendingCreateSlideImageSrc;
   const outgoingBadges = pendingCreateSlideBadges;
+  const outgoingRedact = pendingCreateSlideRedact;
   pendingCreateSlideImageSrc = null;
   pendingCreateSlideBadges = null;
+  pendingCreateSlideRedact = null;
   const shouldAnimate =
     animate && !!directionForAnimation && images.length > 1 && !!cmImg.src;
 
@@ -1314,18 +2133,19 @@ function loadActiveImage(animate = true) {
     cmImg.src = image.dataUrl;
     syncSliderForActiveImage();
     render();
-    requestAnimationFrame(() => {
-      render();
-      if (shouldAnimate && directionForAnimation) {
+    if (shouldAnimate && directionForAnimation) {
+      requestAnimationFrame(() => {
+        render();
         playCreateSlideAnimation(
           directionForAnimation,
           outgoingImageSrc,
           outgoingBadges,
+          outgoingRedact,
         );
-      } else {
-        completeNavigationTransition();
-      }
-    });
+      });
+    } else {
+      completeNavigationTransition();
+    }
     imageSlideDirection = null;
   };
 
@@ -1352,6 +2172,7 @@ function playCreateSlideAnimation(
     badgesWidth: string;
     badgesHeight: string;
   } | null,
+  outgoingRedact: HTMLCanvasElement | null,
 ): void {
   const travelPx = Math.max(
     1,
@@ -1364,6 +2185,7 @@ function playCreateSlideAnimation(
 
   let ghostImg: HTMLImageElement | null = null;
   let ghostBadges: HTMLDivElement | null = null;
+  let ghostRedact: HTMLCanvasElement | null = null;
   if (outgoingImageSrc) {
     ghostImg = document.createElement("img");
     ghostImg.className = "cm-img";
@@ -1390,9 +2212,18 @@ function playCreateSlideAnimation(
     cmCanvasWrap.appendChild(ghostBadges);
   }
 
-  const incomingElements: HTMLElement[] = [cmImg, cmBadges];
+  if (outgoingRedact) {
+    ghostRedact = outgoingRedact;
+    ghostRedact.style.zIndex = "2";
+    ghostRedact.style.pointerEvents = "none";
+    ghostRedact.style.transform = "translateX(0)";
+    cmCanvasWrap.appendChild(ghostRedact);
+  }
+
+  const incomingElements: HTMLElement[] = [cmImg, cmRedactLayer, cmBadges];
   const outgoingElements: HTMLElement[] = [];
   if (ghostImg) outgoingElements.push(ghostImg);
+  if (ghostRedact) outgoingElements.push(ghostRedact);
   if (ghostBadges) outgoingElements.push(ghostBadges);
 
   for (const element of incomingElements) {
@@ -1406,10 +2237,10 @@ function playCreateSlideAnimation(
     ghostImg.style.transform = "translateX(0)";
     void ghostImg.offsetWidth;
   }
-  if (ghostBadges) {
-    ghostBadges.style.transition = "none";
-    ghostBadges.style.transform = "translateX(0)";
-    void ghostBadges.offsetWidth;
+  for (const element of outgoingElements) {
+    element.style.transition = "none";
+    element.style.transform = "translateX(0)";
+    void element.offsetWidth;
   }
 
   requestAnimationFrame(() => {
@@ -1425,24 +2256,24 @@ function playCreateSlideAnimation(
     });
   });
 
-  window.setTimeout(() => {
+  schedulePendingEditorNavTransition(() => {
     for (const element of incomingElements) {
       element.style.transition = "";
       element.style.transform = "";
     }
     ghostImg?.remove();
+    ghostRedact?.remove();
     ghostBadges?.remove();
     completeNavigationTransition();
   }, durationMs + 40);
 }
 
-function canvasRect() {
+function canvasRectForImage(image: EditorImage | undefined) {
   const wrapRect = cmCanvasWrap.getBoundingClientRect();
   const boxW = wrapRect.width;
   const boxH = wrapRect.height;
-  const active = images[activeImageIndex];
-  const naturalW = cmImg.naturalWidth || active?.width || cmImg.width || 0;
-  const naturalH = cmImg.naturalHeight || active?.height || cmImg.height || 0;
+  const naturalW = image?.width || cmImg.naturalWidth || cmImg.width || 0;
+  const naturalH = image?.height || cmImg.naturalHeight || cmImg.height || 0;
 
   if (boxW <= 0 || boxH <= 0 || naturalW <= 0 || naturalH <= 0) {
     return {
@@ -1486,6 +2317,10 @@ function canvasRect() {
     imgW: w,
     imgH: h,
   };
+}
+
+function canvasRect() {
+  return canvasRectForImage(images[activeImageIndex]);
 }
 
 function render() {
@@ -1723,25 +2558,7 @@ function toImagePercentPoint(event: PointerEvent): RedactionPoint | null {
 }
 
 function renderRedactions(rect: ReturnType<typeof canvasRect>): void {
-  cmRedactLayer.style.left = `${rect.x}px`;
-  cmRedactLayer.style.top = `${rect.y}px`;
-  cmRedactLayer.style.width = `${rect.w}px`;
-  cmRedactLayer.style.height = `${rect.h}px`;
-
-  const drawW = Math.max(1, Math.round(rect.w));
-  const drawH = Math.max(1, Math.round(rect.h));
-  if (cmRedactLayer.width !== drawW) cmRedactLayer.width = drawW;
-  if (cmRedactLayer.height !== drawH) cmRedactLayer.height = drawH;
-
-  const ctx = cmRedactLayer.getContext("2d");
-  if (!ctx) return;
-  ctx.clearRect(0, 0, cmRedactLayer.width, cmRedactLayer.height);
-  drawRedactionsOnContext(
-    ctx,
-    getActiveRedactions(),
-    cmRedactLayer.width,
-    cmRedactLayer.height,
-  );
+  paintRedactionsLayer(cmRedactLayer, rect, getActiveRedactions());
 }
 
 function drawRedactionsOnContext(
@@ -2366,18 +3183,16 @@ function isBookValid(p: BadgePlacement): boolean {
 }
 
 function openClassPicker(p: BadgePlacement, isNew: boolean) {
-  pickerTitle.textContent =
-    mode === "annotated"
-      ? "Choose Badge"
-      : "Choose Classification (Best → Worst)";
+  pickerTitle.textContent = mode === "annotated"
+    ? "Choose Badge"
+    : "Choose Classification (Best → Worst)";
   pickerBody.innerHTML = "";
   suppressEditorPickerUntil = Date.now() + 120;
   suppressEditorPickerBackdropUntil =
     Date.now() + EDITOR_PICKER_BACKDROP_GUARD_MS;
 
   const grid = document.createElement("div");
-  grid.className =
-    mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
+  grid.className = mode === "annotated" ? "pk-grid pk-grid--annotated" : "pk-grid";
 
   const bookValid = isBookValid(p);
 

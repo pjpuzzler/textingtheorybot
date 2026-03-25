@@ -1,4 +1,4 @@
-import { navigateTo, requestExpandedMode, showToast } from "@devvit/client";
+import { requestExpandedMode, showToast } from "@devvit/client";
 import {
   ApiEndpoint,
   BADGE_INFO,
@@ -13,9 +13,7 @@ import {
   MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
   MAX_ELO,
-  interquartileMean,
   type InitResponse,
-  type InspectVotesResponse,
   type BadgeVoteOption,
   type BadgeConsensus,
   type BadgePlacement,
@@ -29,9 +27,9 @@ const localVoteGraceUntil: Record<string, number> = {};
 const recentVoteAnimationUntil: Record<string, number> = {};
 let userElo: number | null = null;
 let lastSubmittedElo: number | null = null;
+let hasTouchedEloSlider = false;
 let activeImageIndex = 0;
 let currentPostId = "";
-let currentSubredditName: string | null = null;
 let viewerOwnsPost = false;
 let viewerUserId = "";
 let viewerIsLoggedIn = false;
@@ -61,7 +59,6 @@ let loadingIndicatorShownAt = 0;
 let loadingIndicatorHideTimer: number | null = null;
 const PAGE_SLIDE_DURATION_MS = 210;
 const LOADING_INDICATOR_MIN_VISIBLE_MS = 140;
-const LOADING_INDICATOR_SHOW_DELAY_MS_COMPACT = 180;
 const SWIPE_COMMIT_MIN_PX = 48;
 const SWIPE_COMMIT_RATIO = 0.16;
 const SWIPE_SETTLE_DURATION_MS = 215;
@@ -82,6 +79,7 @@ let swipeStartY = 0;
 let swipeTracking = false;
 let swipeHorizontal = false;
 let swipeLastDx = 0;
+let swipeStartedDuringTransition = false;
 let suppressCanvasClickUntil = 0;
 let suppressSyntheticReleaseClickUntil = 0;
 let swallowSyntheticReleaseClick = false;
@@ -106,14 +104,10 @@ let suppressEloBubbleUntil = 0;
 let swipeTransformRaf: number | null = null;
 let pendingActiveSwipeDx = 0;
 let pendingPreviewSwipeDx: number | null = null;
+let pendingNavTransitionTimeout: number | null = null;
+let pendingNavTransitionFinalizer: (() => void) | null = null;
 let suppressRefreshUntil = 0;
-let inspectorReloadToken = 0;
-let inspectData: InspectVotesResponse | null = null;
-let inspectModeActive = false;
-let inspectDetailTarget:
-  | { kind: "elo" }
-  | { kind: "badge"; badgeId: string }
-  | null = null;
+let postMenuOpen = false;
 
 type StoredVoteSnapshot = {
   updatedAt: number;
@@ -139,17 +133,11 @@ const imgNext = $("img-next") as HTMLButtonElement;
 const imgDots = $("img-dots") as HTMLDivElement;
 const pageChip = $("page-chip") as HTMLDivElement;
 const postMenuEl = $("post-menu") as HTMLDivElement;
-const menuToggleBtn = $("menu-toggle") as HTMLButtonElement;
-const menuDropdownEl = $("menu-dropdown") as HTMLDivElement;
-const menuInfoBtn = document.getElementById(
-  "menu-info",
-) as HTMLButtonElement | null;
-const menuCreateBtn = $("menu-create") as HTMLButtonElement;
-const menuEditBtn = $("menu-edit") as HTMLButtonElement;
-const menuInspectBtn = $("menu-inspect") as HTMLButtonElement;
+const postMenuTriggerBtn = $("post-menu-trigger") as HTMLButtonElement;
+const postMenuSheet = $("post-menu-sheet") as HTMLDivElement;
+const quickCreateBtn = $("quick-create") as HTMLButtonElement;
+const modEditBtn = $("mod-edit") as HTMLButtonElement;
 const badgeVisToggleBtn = $("badge-vis-toggle") as HTMLButtonElement;
-const inspectFooterEl = $("inspect-footer") as HTMLDivElement;
-const inspectEloBtn = $("inspect-elo-btn") as HTMLButtonElement;
 const eloEl = $("elo") as HTMLDivElement;
 const eloLoginEl = document.getElementById(
   "elo-login",
@@ -170,18 +158,10 @@ const pickerOvl = $("picker-overlay") as HTMLDivElement;
 const pickerBg = $("picker-bg") as HTMLDivElement;
 const pickerTitle = $("picker-title") as HTMLDivElement;
 const pickerBody = $("picker-body") as HTMLDivElement;
-const inspectorOvl = $("inspector-overlay") as HTMLDivElement;
-const inspectorBg = $("inspector-bg") as HTMLDivElement;
-const inspectorTitleEl = $("inspector-title") as HTMLDivElement;
-const inspectorMetaEl = $("inspector-meta") as HTMLDivElement;
-const inspectorCloseBtn = $("inspector-close") as HTMLButtonElement;
-const inspectorBody = $("inspector-body") as HTMLDivElement;
 const query = new URLSearchParams(window.location.search);
 const isExpandedView =
   query.get("expanded") === "1" ||
   window.location.pathname.endsWith("/post-expanded.html");
-
-document.body.classList.toggle("expanded-view", isExpandedView);
 
 if (isAndroidLike()) {
   canvasEl.style.touchAction = "none";
@@ -195,102 +175,6 @@ function pageStateStorageKey(): string | null {
 
 function voteStateStorageKey(): string | null {
   return currentPostId ? `tt:votes:${currentPostId}` : null;
-}
-
-function expandedInspectIntentKey(): string {
-  return "tt:expanded-intent";
-}
-
-function setExpandedInspectIntent(): void {
-  try {
-    if (!currentPostId) return;
-    window.localStorage.setItem(
-      expandedInspectIntentKey(),
-      JSON.stringify({
-        postId: currentPostId,
-        mode: "inspect",
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // ignore storage issues in embedded views
-  }
-}
-
-function consumeExpandedInspectIntent(): boolean {
-  try {
-    const raw = window.localStorage.getItem(expandedInspectIntentKey());
-    if (!raw) return false;
-    window.localStorage.removeItem(expandedInspectIntentKey());
-    const parsed = JSON.parse(raw) as {
-      postId?: string;
-      mode?: string;
-      createdAt?: number;
-    };
-    const ageMs = Date.now() - (parsed.createdAt ?? 0);
-    return (
-      parsed.postId === currentPostId &&
-      parsed.mode === "inspect" &&
-      ageMs >= 0 &&
-      ageMs < 60_000
-    );
-  } catch {
-    return false;
-  }
-}
-
-function navigateExternal(url: string | null): void {
-  if (!url) return;
-  navigateTo(url);
-}
-
-function readInspectTargetFromLocation():
-  | { kind: "elo" }
-  | { kind: "badge"; badgeId: string }
-  | null {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("inspect") !== "1") return null;
-  const target = params.get("inspectTarget");
-  if (target === "elo") return { kind: "elo" };
-  if (target === "badge") {
-    const badgeId = params.get("badgeId");
-    if (badgeId) return { kind: "badge", badgeId };
-  }
-  return null;
-}
-
-function updateInspectLocation(
-  target: { kind: "elo" } | { kind: "badge"; badgeId: string } | null,
-  replace = false,
-): void {
-  if (!isExpandedView) return;
-  const url = new URL(window.location.href);
-  if (!inspectModeActive && !target) {
-    url.searchParams.delete("inspect");
-    url.searchParams.delete("inspectTarget");
-    url.searchParams.delete("badgeId");
-  } else {
-    url.searchParams.set("inspect", "1");
-    if (!target) {
-      url.searchParams.delete("inspectTarget");
-      url.searchParams.delete("badgeId");
-    } else if (target.kind === "elo") {
-      url.searchParams.set("inspectTarget", "elo");
-      url.searchParams.delete("badgeId");
-    } else {
-      url.searchParams.set("inspectTarget", "badge");
-      url.searchParams.set("badgeId", target.badgeId);
-    }
-  }
-  const method = replace
-    ? window.history.replaceState
-    : window.history.pushState;
-  method.call(
-    window.history,
-    {},
-    "",
-    `${url.pathname}${url.search}${url.hash}`,
-  );
 }
 
 function readStoredVoteSnapshot(): StoredVoteSnapshot | null {
@@ -408,8 +292,9 @@ function writeActiveImageIndexToStorage(): void {
   persistActiveImageIndex();
 }
 
-function finalizeCommittedPreview(): void {
+function finalizeCommittedPreview(immediate = false): void {
   if (!committedPreviewImg && !committedPreviewBadges) return;
+  navTransitionInFlight = false;
   cancelSwipeTransformFrame();
   canvasImg.style.transform = "";
   badgesEl.style.transform = "";
@@ -421,6 +306,11 @@ function finalizeCommittedPreview(): void {
   committedPreviewBadges = null;
   lastBadgeLayoutKey = "";
   layoutBadges(true);
+  if (immediate) {
+    canvasImg.style.transition = "";
+    badgesEl.style.transition = "";
+    return;
+  }
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       canvasImg.style.transition = "";
@@ -550,6 +440,7 @@ function findCurrentImagePlacementById(
 }
 
 function applyImageIndexImmediately(nextIndex: number): void {
+  clearPendingNavTransition();
   if (!postData) return;
   const clampedIndex = Math.max(
     0,
@@ -562,7 +453,7 @@ function applyImageIndexImmediately(nextIndex: number): void {
   pendingSlideSnapshot = null;
   imageLoadToken += 1;
   clearSwipePreview();
-  finalizeCommittedPreview();
+  finalizeCommittedPreview(true);
   canvasEl.classList.remove("is-dragging");
   canvasImg.style.transition = "none";
   badgesEl.style.transition = "none";
@@ -600,8 +491,6 @@ function commitSwipeNavigation(nextIndex: number): void {
   imageSlideDirection = null;
   pendingSlideSnapshot = null;
   canvasEl.classList.remove("is-dragging");
-  canvasImg.style.visibility = "hidden";
-  badgesEl.style.visibility = "hidden";
   canvasImg.style.transition = "none";
   badgesEl.style.transition = "none";
   canvasImg.style.transform = translateXPx(0);
@@ -638,11 +527,41 @@ function commitSwipeNavigation(nextIndex: number): void {
   }
 }
 
+function clearPendingNavTransition(): void {
+  if (pendingNavTransitionTimeout !== null) {
+    window.clearTimeout(pendingNavTransitionTimeout);
+    pendingNavTransitionTimeout = null;
+  }
+  pendingNavTransitionFinalizer = null;
+}
+
+function schedulePendingNavTransition(
+  finalizer: () => void,
+  delayMs: number,
+): void {
+  clearPendingNavTransition();
+  pendingNavTransitionFinalizer = finalizer;
+  pendingNavTransitionTimeout = window.setTimeout(() => {
+    const nextFinalizer = pendingNavTransitionFinalizer;
+    clearPendingNavTransition();
+    nextFinalizer?.();
+  }, delayMs);
+}
+
+function interruptSwipeNavigationTransition(): void {
+  if (!navTransitionInFlight) return;
+  queuedNavIndex = null;
+  clearPendingNavTransition();
+  applyImageIndexImmediately(activeImageIndex);
+}
+
 function finishSwipeNavigation(nextIndex: number, dx: number): void {
   if (!swipePreviewImg || !swipePreviewBadges) {
     commitSwipeNavigation(nextIndex);
     return;
   }
+  navTransitionInFlight = true;
+  activeImageIndex = nextIndex;
   cancelSwipeTransformFrame();
   const travelPx = Math.max(
     1,
@@ -663,7 +582,7 @@ function finishSwipeNavigation(nextIndex: number, dx: number): void {
     swipePreviewBadges!.style.transform = translateXPx(0);
   });
 
-  window.setTimeout(() => {
+  schedulePendingNavTransition(() => {
     commitSwipeNavigation(nextIndex);
   }, SWIPE_SETTLE_DURATION_MS + 20);
 }
@@ -756,147 +675,14 @@ function syncTransientStateFromStorage(): void {
   const imageIndexBefore = activeImageIndex;
   syncActiveImageIndexFromStorage();
   const votesChanged = syncVotesFromStorage();
-  if (votesChanged || imageIndexBefore !== activeImageIndex) {
+  if (votesChanged && imageIndexBefore === activeImageIndex) {
     layoutBadges(true);
   }
 }
 
-function openMenu(): void {
-  menuDropdownEl.classList.remove("hidden");
-}
-
-function closeMenu(): void {
-  menuDropdownEl.classList.add("hidden");
-}
-
-function toggleMenu(): void {
-  if (menuDropdownEl.classList.contains("hidden")) openMenu();
-  else closeMenu();
-}
-
-function openInspector(): void {
-  inspectorOvl.classList.add("open");
-  inspectorOvl.classList.remove("hidden");
-}
-
-function closeInspector(): void {
-  inspectorOvl.classList.remove("open");
-  inspectorOvl.classList.add("hidden");
-}
-
-menuToggleBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  toggleMenu();
-});
-
-menuInfoBtn?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  closeMenu();
-  const wikiUrl = subredditWikiUrl();
-  if (!wikiUrl) {
-    showToast("Subreddit wiki unavailable");
-    return;
-  }
-  navigateExternal(wikiUrl);
-});
-
-menuCreateBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  openCreateFlow(event);
-});
-
-menuEditBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  openEditFlow(event);
-});
-
-menuInspectBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  openInspectFlow(event);
-});
-
-inspectorBg.addEventListener("click", () => {
-  if (inspectModeActive && inspectDetailTarget) {
-    window.history.back();
-    return;
-  }
-  closeInspector();
-});
-
-inspectorCloseBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  if (inspectModeActive && inspectDetailTarget) {
-    window.history.back();
-    return;
-  }
-  closeInspector();
-});
-
-inspectEloBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  void openInspectDetail({ kind: "elo" }).catch((error) => {
-    showToast(
-      error instanceof Error ? error.message : "Failed to load vote breakdown",
-    );
-  });
-});
-
-document.addEventListener("pointerdown", (event) => {
-  const target = event.target as HTMLElement | null;
-  if (!target) return;
-  if (
-    !target.closest(".post-menu") &&
-    !menuDropdownEl.classList.contains("hidden")
-  ) {
-    closeMenu();
-  }
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    closeMenu();
-    if (inspectModeActive && inspectDetailTarget) {
-      window.history.back();
-    } else if (inspectModeActive) {
-      exitInspectMode();
-    } else {
-      closeInspector();
-    }
-  }
-});
-
-window.addEventListener("popstate", () => {
-  if (!isExpandedView || !viewerIsModerator) return;
-  const nextTarget = readInspectTargetFromLocation();
-  const params = new URLSearchParams(window.location.search);
-  const wantsInspect = params.get("inspect") === "1";
-  if (!wantsInspect) {
-    exitInspectMode(false);
-    return;
-  }
-  inspectModeActive = true;
-  updateInspectChrome();
-  if (!nextTarget) {
-    openInspectRoot(true);
-    return;
-  }
-  void openInspectDetail(nextTarget, false).catch((error) => {
-    showToast(
-      error instanceof Error ? error.message : "Failed to load vote breakdown",
-    );
-  });
-});
-
 function resetPostTransientOverlays(): void {
   pickerOvl.classList.remove("open");
   voteHintEl.classList.add("hidden");
-  closeMenu();
-  closeInspector();
 }
 
 function shouldShowVoteHint(): boolean {
@@ -954,25 +740,10 @@ async function fetchInitWithTimeout(timeoutMs: number): Promise<Response> {
 
 function startLoadingIndicator(): void {
   stopLoadingIndicator();
-  const show = () => {
-    loadingIndicatorTimer = null;
-    loadingEl.style.display = "flex";
-    loadingIndicatorShownAt = Date.now();
-    loadingEl.classList.add("is-visible");
-  };
-
-  if (isExpandedView) {
-    show();
-    return;
-  }
-
-  loadingEl.style.display = "none";
-  loadingIndicatorShownAt = 0;
-  loadingEl.classList.remove("is-visible");
-  loadingIndicatorTimer = window.setTimeout(
-    show,
-    LOADING_INDICATOR_SHOW_DELAY_MS_COMPACT,
-  );
+  loadingEl.style.display = "flex";
+  loadingIndicatorTimer = null;
+  loadingIndicatorShownAt = Date.now();
+  loadingEl.classList.add("is-visible");
 }
 
 function stopLoadingIndicator(): void {
@@ -1023,6 +794,15 @@ function beginInitialPostReveal(): void {
 function completeInitialPostReveal(): void {
   postEl.classList.add("is-ready");
   stopLoadingIndicator();
+}
+
+async function waitForCurrentImageReady(): Promise<void> {
+  const imageUrl = currentImage()?.imageUrl;
+  const preloader = imageUrl ? getOrCreatePreloadedImage(imageUrl) : null;
+  if (!preloader) return;
+  await new Promise<void>((resolve) => {
+    onImageReady(preloader, resolve);
+  });
 }
 
 function schedulePostLayoutRefresh(): void {
@@ -1281,6 +1061,18 @@ function clearVoteLockCountdownTimer(): void {
   }
 }
 
+function setPostMenuOpen(open: boolean): void {
+  postMenuOpen = open;
+  postMenuEl.classList.toggle("is-open", open);
+  postMenuSheet.hidden = !open;
+  postMenuTriggerBtn.setAttribute("aria-expanded", String(open));
+}
+
+function closePostMenu(): void {
+  if (!postMenuOpen) return;
+  setPostMenuOpen(false);
+}
+
 function updateOwnPostVotingFooterText(): void {
   if (!eloLoginTextEl) return;
   const timeLeftMs = getVoteLockTimeLeftMs();
@@ -1390,7 +1182,6 @@ function updateVoteFooter(initializeElo = false): void {
     !postData ||
     postData.mode !== "vote" ||
     isExpandedView ||
-    inspectModeActive ||
     !isVotingWindowOpen()
   ) {
     clearVoteLockCountdownTimer();
@@ -1597,14 +1388,6 @@ async function init() {
     viewerIsLoggedIn = !!data.userId;
     viewerIsModerator = !!data.isModerator;
     hasEverSubmittedBadgeVote = !!data.hasEverSubmittedBadgeVote;
-    currentSubredditName = data.subredditName ?? null;
-    inspectData = null;
-
-    menuEditBtn.classList.toggle("hidden", !viewerIsModerator || !postData);
-    menuInspectBtn.classList.toggle("hidden", !viewerIsModerator || !postData);
-    if (isExpandedView) {
-      postMenuEl.style.display = "none";
-    }
 
     if (!postData) {
       postEl.classList.remove("is-ready");
@@ -1634,41 +1417,60 @@ async function init() {
       badgeVisToggleBtn.style.display = "none";
     }
     applyBadgeVisibility();
+    postMenuTriggerBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPostMenuOpen(!postMenuOpen);
+    });
+    postMenuSheet.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+    postMenuSheet.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("#post-menu")) return;
+      closePostMenu();
+    });
+    quickCreateBtn.addEventListener("click", (event) => {
+      closePostMenu();
+      try {
+        requestExpandedMode(event as unknown as MouseEvent, "create");
+      } catch {
+        window.location.href = "/app.html";
+      }
+    });
     if (isExpandedView) {
+      postMenuEl.style.display = "none";
+      quickCreateBtn.style.display = "none";
       badgeVisToggleBtn.style.display = "none";
+      modEditBtn.style.display = "none";
+    }
+
+    if (viewerIsModerator && !isExpandedView) {
+      modEditBtn.style.display = "inline-flex";
+      modEditBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closePostMenu();
+        try {
+          requestExpandedMode(event as unknown as MouseEvent, "edit");
+        } catch {
+          window.location.href = "/app.html?mode=edit";
+        }
+      });
+    } else {
+      modEditBtn.style.display = "none";
     }
 
     if (postData.images.length > 1) imageNav.style.display = "flex";
     updateImageNav();
     preloadNearbyImages();
+    await waitForCurrentImageReady();
     loadCurrentImage(false);
     updateVoteFooter(true);
     completeInitialPostReveal();
-    if (isExpandedView && viewerIsModerator) {
-      const shouldOpenInspect =
-        new URLSearchParams(window.location.search).get("inspect") === "1" ||
-        consumeExpandedInspectIntent();
-      if (shouldOpenInspect) {
-        const initialTarget = readInspectTargetFromLocation();
-        if (initialTarget) {
-          inspectModeActive = true;
-          updateInspectChrome();
-          updateVoteFooter(false);
-          await openInspectDetail(initialTarget, false);
-        } else {
-          openInspectRoot(true);
-          try {
-            await ensureInspectData();
-          } catch (error) {
-            showToast(
-              error instanceof Error
-                ? error.message
-                : "Failed to load vote breakdown",
-            );
-          }
-        }
-      }
-    }
     if (shouldShowVoteHint()) {
       window.setTimeout(() => {
         if (shouldShowVoteHint()) openVoteHint();
@@ -1709,24 +1511,21 @@ async function init() {
   }
 }
 
-async function refreshPostState(force = false) {
+async function refreshPostState() {
   if (!postData || document.hidden) return;
-  if (!force && pickerOvl.classList.contains("open")) return;
-  if (!force && inspectModeActive) return;
-  if (!force && !inspectorOvl.classList.contains("hidden")) return;
-  if (!force && Date.now() - lastUserInteractionAt < 900) return;
-  if (!force && Date.now() < suppressRefreshUntil) return;
+  if (pickerOvl.classList.contains("open")) return;
+  if (Date.now() - lastUserInteractionAt < 900) return;
+  if (Date.now() < suppressRefreshUntil) return;
   try {
     const currentImageUrl = currentImage()?.imageUrl ?? null;
     const res = await fetch(ApiEndpoint.Init);
     if (!res.ok) return;
     const data = (await res.json()) as InitResponse;
     if (!data.postData) return;
-    if (!force && Date.now() < suppressRefreshUntil) return;
+    if (Date.now() < suppressRefreshUntil) return;
 
     postData = normalizePostData(data.postData);
     currentPostId = data.postId;
-    currentSubredditName = data.subredditName ?? null;
     viewerOwnsPost = !!data.isOwnPost;
     consensus = data.consensus;
     const now = Date.now();
@@ -1893,7 +1692,7 @@ function playSlideAnimation(
     });
   });
 
-  window.setTimeout(() => {
+  schedulePendingNavTransition(() => {
     for (const element of incomingElements) {
       element.style.transition = "";
       element.style.transform = "";
@@ -1921,6 +1720,7 @@ function navigateToImage(nextIndex: number): void {
 }
 
 function startNavigationTo(nextIndex: number): void {
+  clearPendingNavTransition();
   navTransitionInFlight = true;
 
   pendingSlideSnapshot = {
@@ -1940,6 +1740,7 @@ function startNavigationTo(nextIndex: number): void {
 }
 
 function completeNavigationTransition(): void {
+  clearPendingNavTransition();
   navTransitionInFlight = false;
   if (!postData) return;
   const queued = queuedNavIndex;
@@ -2036,7 +1837,9 @@ canvasEl.addEventListener("click", (event) => {
   if (
     (target.closest(".badge") && !badgeClicksOpenExpanded) ||
     target.closest(".img-nav-btn") ||
-    target.closest(".post-menu") ||
+    target.closest("#post-menu") ||
+    target.closest("#quick-create") ||
+    target.closest("#mod-edit") ||
     target.closest("#badge-vis-toggle") ||
     target.closest(".image-nav")
   ) {
@@ -2104,8 +1907,6 @@ function renderBadgesInto(
     const isLiveVoteWindow = pd.mode === "vote" && isVotingWindowOpen();
     const opensExpandedOnTap =
       !isExpandedView && !(pd.mode === "vote" && canVoteOnCurrentPost());
-    const opensInspectOnTap =
-      inspectModeActive && isExpandedView && viewerIsModerator;
     let badgeImageUrl: string | null = null;
     let faceEl: HTMLDivElement | null = null;
     let voteEl: HTMLDivElement | null = null;
@@ -2168,21 +1969,7 @@ function renderBadgesInto(
       el.appendChild(faceEl);
     }
 
-    if (interactive && opensInspectOnTap) {
-      el.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void openInspectDetail({ kind: "badge", badgeId: p.id }).catch(
-          (error) => {
-            showToast(
-              error instanceof Error
-                ? error.message
-                : "Failed to load vote breakdown",
-            );
-          },
-        );
-      });
-    } else if (interactive && pd.mode === "vote" && canVoteOnCurrentPost()) {
+    if (interactive && pd.mode === "vote" && canVoteOnCurrentPost()) {
       el.addEventListener("pointerdown", (event) => {
         if (Date.now() < suppressPickerReopenUntil) {
           return;
@@ -2418,408 +2205,6 @@ function closePicker() {
   closeHint();
 }
 
-function subredditWikiUrl(): string | null {
-  if (!currentSubredditName) return null;
-  return `https://www.reddit.com/r/${encodeURIComponent(
-    currentSubredditName.toLowerCase(),
-  )}/wiki/index/`;
-}
-
-function updateInspectChrome(): void {
-  const showInspectFooter =
-    inspectModeActive && isExpandedView && viewerIsModerator && !!postData;
-  inspectFooterEl.classList.toggle("hidden", !showInspectFooter);
-  document.body.classList.toggle("inspect-mode", showInspectFooter);
-}
-
-function exitInspectMode(updateHistory = true): void {
-  inspectModeActive = false;
-  inspectDetailTarget = null;
-  closeInspector();
-  updateInspectChrome();
-  updateVoteFooter(false);
-  if (updateHistory) {
-    updateInspectLocation(null);
-  }
-}
-
-function openInspectRoot(replaceHistory = false): void {
-  inspectModeActive = true;
-  inspectDetailTarget = null;
-  closeInspector();
-  updateInspectChrome();
-  updateVoteFooter(false);
-  updateInspectLocation(null, replaceHistory);
-}
-
-async function ensureInspectData(force = false): Promise<InspectVotesResponse> {
-  if (inspectData && !force) {
-    updateInspectChrome();
-    return inspectData;
-  }
-  const token = ++inspectorReloadToken;
-  const res = await fetch(ApiEndpoint.InspectVotes, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ includeUsers: true }),
-  });
-  if (token !== inspectorReloadToken) {
-    return (
-      inspectData ??
-      ({
-        type: "inspect-votes",
-        badgeVotes: {},
-        eloVotes: [],
-      } satisfies InspectVotesResponse)
-    );
-  }
-  if (!res.ok) {
-    const err = await res
-      .json()
-      .catch(() => ({ error: "Failed to load vote breakdown" }));
-    throw new Error(
-      (err as { error?: string }).error ?? "Failed to load vote breakdown",
-    );
-  }
-  inspectData = (await res.json()) as InspectVotesResponse;
-  updateInspectChrome();
-  return inspectData;
-}
-
-function openCreateFlow(event?: Event): void {
-  closeMenu();
-  try {
-    requestExpandedMode(
-      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
-      "create",
-    );
-  } catch {
-    window.location.href = "/app.html";
-  }
-}
-
-function openEditFlow(event?: Event): void {
-  closeMenu();
-  try {
-    requestExpandedMode(
-      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
-      "edit",
-    );
-  } catch {
-    window.location.href = "/app.html?mode=edit";
-  }
-}
-
-function openInspectFlow(event?: Event): void {
-  closeMenu();
-  setExpandedInspectIntent();
-  try {
-    requestExpandedMode(
-      (event as unknown as MouseEvent) ?? new MouseEvent("click"),
-      "expanded",
-    );
-  } catch {
-    window.location.href = "/post-expanded.html?inspect=1";
-  }
-}
-
-function formatPreciseIqm(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "n/a";
-  return value.toFixed(2);
-}
-
-function formatAccountAgeDays(days: number | null): string {
-  if (days === null || !Number.isFinite(days)) return "age n/a";
-  if (days >= 365) {
-    const years = days / 365;
-    return `${years.toFixed(years >= 10 ? 0 : 1)}yr`;
-  }
-  if (days >= 30) {
-    const months = days / 30;
-    return `${months.toFixed(months >= 10 ? 0 : 1)}mo`;
-  }
-  return `${Math.max(0, Math.floor(days))}d`;
-}
-
-function formatCompactKarma(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "karma n/a";
-  const safe = Math.max(0, value);
-  if (safe >= 1_000_000) {
-    return `${(safe / 1_000_000).toFixed(safe >= 10_000_000 ? 0 : 1)}M karma`;
-  }
-  if (safe >= 1_000) {
-    return `${(safe / 1_000).toFixed(safe >= 10_000 ? 0 : 1)}K karma`;
-  }
-  return `${Math.floor(safe)} karma`;
-}
-
-function badgeVoteSortRank(vote: BadgeVoteOption): number {
-  const allVotes: BadgeVoteOption[] = [
-    Classification.BRILLIANT,
-    Classification.GREAT,
-    Classification.BEST,
-    Classification.EXCELLENT,
-    Classification.GOOD,
-    Classification.BOOK,
-    Classification.FORCED,
-    Classification.INACCURACY,
-    Classification.MISTAKE,
-    Classification.MISS,
-    Classification.BLUNDER,
-    ...RESULT_PICKER_OPTIONS,
-  ];
-  const index = allVotes.indexOf(vote);
-  return index === -1 ? allVotes.length : index;
-}
-
-function createInspectorValueEl(
-  vote: BadgeVoteOption | number,
-): HTMLDivElement {
-  const value = document.createElement("div");
-  value.className = "inspector-value";
-
-  if (typeof vote === "number") {
-    const numberEl = document.createElement("div");
-    numberEl.className = "inspector-vote-number";
-    numberEl.textContent = `${vote} Elo`;
-    value.appendChild(numberEl);
-  } else {
-    const icon = document.createElement("div");
-    icon.className = "inspector-vote-icon";
-    icon.style.backgroundImage = `url(${badgeAsset(vote)})`;
-    icon.title = getVoteOptionInfo(vote).label;
-    value.appendChild(icon);
-  }
-  return value;
-}
-
-function createInspectorVoteRow(
-  userId: string,
-  username: string,
-  profileUrl: string | null,
-  totalKarma: number | null,
-  accountAgeDays: number | null,
-  vote: BadgeVoteOption | number,
-  onRemove: () => void,
-): HTMLDivElement {
-  const row = document.createElement("div");
-  row.className = "inspector-vote-row";
-
-  const userBlock = document.createElement("div");
-  userBlock.className = "inspector-user";
-
-  const userLink = document.createElement("a");
-  userLink.className = "inspector-user-link";
-
-  const userNameEl = document.createElement("div");
-  userNameEl.className = "inspector-user-name";
-  userNameEl.textContent = `u/${username}`;
-
-  const userMetaEl = document.createElement("div");
-  userMetaEl.className = "inspector-user-meta";
-  userMetaEl.textContent = `${formatCompactKarma(
-    totalKarma,
-  )} • ${formatAccountAgeDays(accountAgeDays)}`;
-
-  const resolvedProfileUrl =
-    profileUrl ??
-    (!/^t2_/.test(username)
-      ? `https://www.reddit.com/user/${encodeURIComponent(username)}/`
-      : null);
-
-  userLink.appendChild(userNameEl);
-  userLink.href = resolvedProfileUrl ?? "#";
-  userLink.target = "_top";
-  userLink.rel = "noreferrer noopener";
-  userBlock.appendChild(userLink);
-  userBlock.appendChild(userMetaEl);
-  userLink.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!resolvedProfileUrl) return;
-    navigateExternal(resolvedProfileUrl);
-  });
-
-  const value = createInspectorValueEl(vote);
-
-  const removeBtn = document.createElement("button");
-  removeBtn.type = "button";
-  removeBtn.className = "inspector-remove";
-  removeBtn.textContent = "X";
-  removeBtn.setAttribute("aria-label", `Remove vote from ${username}`);
-  removeBtn.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    removeBtn.disabled = true;
-    onRemove();
-  });
-
-  row.appendChild(userBlock);
-  row.appendChild(value);
-  row.appendChild(removeBtn);
-  return row;
-}
-
-async function removeInspectedVote(
-  target: "elo" | "badge",
-  userId: string,
-  badgeId?: string,
-): Promise<void> {
-  const body =
-    target === "elo"
-      ? { target, userId }
-      : { target, userId, badgeId: badgeId ?? "" };
-  const res = await fetch(ApiEndpoint.RemoveVote, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res
-      .json()
-      .catch(() => ({ error: "Failed to remove vote" }));
-    throw new Error(
-      (err as { error?: string }).error ?? "Failed to remove vote",
-    );
-  }
-  await refreshPostState(true);
-  await ensureInspectData(true);
-  if (inspectDetailTarget) {
-    renderInspectDetail(inspectDetailTarget, inspectData);
-  }
-}
-
-function renderInspectDetail(
-  target: { kind: "elo" } | { kind: "badge"; badgeId: string },
-  data: InspectVotesResponse | null,
-): void {
-  openInspector();
-  inspectorBody.innerHTML = "";
-  if (!data) {
-    inspectorTitleEl.textContent = "Inspect Votes";
-    inspectorMetaEl.textContent = "";
-    inspectorBody.innerHTML =
-      '<div class="inspector-loading">Loading vote breakdown...</div>';
-    return;
-  }
-
-  if (target.kind === "elo") {
-    const eloIqm = data.eloVotes.length
-      ? interquartileMean(data.eloVotes.map((entry) => entry.elo))
-      : null;
-    inspectorTitleEl.textContent = "Elo votes";
-    inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(eloIqm)} • ${
-      data.eloVotes.length
-    } total`;
-    if (!data.eloVotes.length) {
-      inspectorBody.innerHTML =
-        '<div class="inspector-empty">No Elo votes yet.</div>';
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    [...data.eloVotes]
-      .sort((a, b) => {
-        if (a.elo !== b.elo) return b.elo - a.elo;
-        return a.username.localeCompare(b.username);
-      })
-      .forEach((entry) => {
-        fragment.appendChild(
-          createInspectorVoteRow(
-            entry.userId,
-            entry.username,
-            entry.profileUrl,
-            entry.totalKarma,
-            entry.accountAgeDays,
-            entry.elo,
-            () => {
-              void removeInspectedVote("elo", entry.userId).catch((error) => {
-                showToast(
-                  error instanceof Error
-                    ? error.message
-                    : "Failed to remove Elo vote",
-                );
-              });
-            },
-          ),
-        );
-      });
-    inspectorBody.appendChild(fragment);
-    return;
-  }
-
-  const placement = getSortedPlacements().find(
-    (entry) => entry.id === target.badgeId,
-  );
-  const votes = data.badgeVotes[target.badgeId] ?? [];
-  const winningVote = consensus[target.badgeId]?.winningVote;
-  inspectorTitleEl.textContent = winningVote
-    ? getVoteOptionInfo(winningVote).label
-    : "Badge votes";
-  inspectorMetaEl.textContent = `IQM ${formatPreciseIqm(
-    consensus[target.badgeId]?.iqm ?? null,
-  )} • ${votes.length} total`;
-  if (!placement || !votes.length) {
-    inspectorBody.innerHTML =
-      '<div class="inspector-empty">No votes for this badge yet.</div>';
-    return;
-  }
-  const fragment = document.createDocumentFragment();
-  [...votes]
-    .sort((a, b) => {
-      const rankDelta = badgeVoteSortRank(a.vote) - badgeVoteSortRank(b.vote);
-      if (rankDelta !== 0) return rankDelta;
-      return a.username.localeCompare(b.username);
-    })
-    .forEach((entry) => {
-      fragment.appendChild(
-        createInspectorVoteRow(
-          entry.userId,
-          entry.username,
-          entry.profileUrl,
-          entry.totalKarma,
-          entry.accountAgeDays,
-          entry.vote,
-          () => {
-            void removeInspectedVote("badge", entry.userId, placement.id).catch(
-              (error) => {
-                showToast(
-                  error instanceof Error
-                    ? error.message
-                    : "Failed to remove badge vote",
-                );
-              },
-            );
-          },
-        ),
-      );
-    });
-  inspectorBody.appendChild(fragment);
-}
-
-async function openInspectDetail(
-  target: { kind: "elo" } | { kind: "badge"; badgeId: string },
-  updateHistory = true,
-): Promise<void> {
-  inspectModeActive = true;
-  inspectDetailTarget = target;
-  updateInspectChrome();
-  renderInspectDetail(target, null);
-  if (updateHistory) {
-    updateInspectLocation(target);
-  }
-  let data: InspectVotesResponse;
-  try {
-    data = await ensureInspectData();
-  } catch (error) {
-    inspectorBody.innerHTML = `<div class="inspector-empty">${
-      error instanceof Error ? error.message : "Failed to load vote breakdown"
-    }</div>`;
-    throw error;
-  }
-  if (!inspectDetailTarget) return;
-  renderInspectDetail(target, data);
-}
-
 document.addEventListener(
   "click",
   (event) => {
@@ -2940,6 +2325,7 @@ function setupElo() {
     eloSlider.value = "1000";
   }
 
+  hasTouchedEloSlider = false;
   updateEloDisplay();
   updateGmTickPosition();
   hideEloBubble(true);
@@ -2961,10 +2347,11 @@ function updateEloDisplay() {
   const val = Number(eloSlider.value);
   eloBubbleText.textContent = `${val} Elo`;
   updateEloBubblePosition();
+  const defaultLabel = userElo === null ? "Vote" : "Update";
 
   if (isOwnPost()) {
     eloBtn.disabled = true;
-    eloBtn.textContent = userElo === null ? "Vote" : "Update";
+    eloBtn.textContent = defaultLabel;
     return;
   }
 
@@ -2974,8 +2361,8 @@ function updateEloDisplay() {
     return;
   }
 
-  eloBtn.disabled = false;
-  eloBtn.textContent = userElo === null ? "Vote" : "Update";
+  eloBtn.disabled = !hasTouchedEloSlider;
+  eloBtn.textContent = defaultLabel;
 }
 
 function beginSwipe(
@@ -2985,7 +2372,9 @@ function beginSwipe(
   badgePlacement: BadgePlacement | null,
   badgeTapNeedsManualOpen: boolean,
 ): void {
+  interruptSwipeNavigationTransition();
   swipeStartedNearEdge = nearEdge;
+  swipeStartedDuringTransition = navTransitionInFlight;
   pendingBadgeTapPlacement = badgePlacement;
   pendingBadgeTapNeedsManualOpen = badgeTapNeedsManualOpen;
   swipeTracking = true;
@@ -3014,6 +2403,7 @@ function updateSwipe(clientX: number, clientY: number): boolean {
     if (Math.abs(dx) <= Math.abs(dy) * (androidLike ? 1.08 : 0.95)) {
       swipeTracking = false;
       swipeStartedNearEdge = false;
+      swipeStartedDuringTransition = false;
       pendingBadgeTapPlacement = null;
       pendingBadgeTapNeedsManualOpen = false;
       swipeInputMode = null;
@@ -3030,6 +2420,9 @@ function updateSwipe(clientX: number, clientY: number): boolean {
   const canNavigate = targetIndex >= 0 && targetIndex < postData.images.length;
   const adjustedDx = Math.round(canNavigate ? dx : dx * 0.16);
   swipeLastDx = adjustedDx;
+  if (swipeStartedDuringTransition) {
+    return true;
+  }
   suppressCanvasExpandUntil = Date.now() + 400;
   suppressCanvasClickUntil = Date.now() + 400;
   canvasEl.classList.add("is-dragging");
@@ -3047,10 +2440,12 @@ function updateSwipe(clientX: number, clientY: number): boolean {
 function endSwipe(clientX: number, clientY: number): void {
   if (!swipeTracking || !postData) return;
   const wasHorizontal = swipeHorizontal;
+  const startedDuringTransition = swipeStartedDuringTransition;
   swipeTracking = false;
   swipeHorizontal = false;
   const dx = swipeLastDx || clientX - swipeStartX;
   swipeLastDx = 0;
+  swipeStartedDuringTransition = false;
   swipeInputMode = null;
   swipePointerId = null;
   if (!wasHorizontal) {
@@ -3085,6 +2480,15 @@ function endSwipe(clientX: number, clientY: number): void {
       ),
     ),
   );
+  if (startedDuringTransition) {
+    if (canNavigate && Math.abs(dx) >= commitThreshold) {
+      queuedNavIndex = nextIndex;
+    }
+    swipeStartedNearEdge = false;
+    pendingBadgeTapPlacement = null;
+    pendingBadgeTapNeedsManualOpen = false;
+    return;
+  }
   if (
     canNavigate &&
     Math.abs(dx) >= commitThreshold &&
@@ -3107,6 +2511,7 @@ function cancelSwipeGesture(): void {
   swipeHorizontal = false;
   swipeLastDx = 0;
   swipeStartedNearEdge = false;
+  swipeStartedDuringTransition = false;
   pendingBadgeTapPlacement = null;
   pendingBadgeTapNeedsManualOpen = false;
   swipeInputMode = null;
@@ -3170,7 +2575,9 @@ canvasEl.addEventListener(
     );
     if (
       target.closest(".img-nav-btn") ||
-      target.closest(".post-menu") ||
+      target.closest("#post-menu") ||
+      target.closest("#quick-create") ||
+      target.closest("#mod-edit") ||
       target.closest("#badge-vis-toggle")
     ) {
       return;
@@ -3256,7 +2663,9 @@ canvasEl.addEventListener("pointerdown", (event) => {
   );
   if (
     target.closest(".img-nav-btn") ||
-    target.closest(".post-menu") ||
+    target.closest("#post-menu") ||
+    target.closest("#quick-create") ||
+    target.closest("#mod-edit") ||
     target.closest("#badge-vis-toggle")
   ) {
     return;
@@ -3334,7 +2743,9 @@ document.addEventListener(
     const target = event.target as HTMLElement;
     if (
       target.closest(".img-nav-btn") ||
-      target.closest(".post-menu") ||
+      target.closest("#post-menu") ||
+      target.closest("#quick-create") ||
+      target.closest("#mod-edit") ||
       target.closest("#badge-vis-toggle") ||
       pickerOvl.classList.contains("open")
     ) {
@@ -3368,6 +2779,7 @@ eloSlider.addEventListener("pointerdown", (event) => {
   if (shouldIgnoreAndroidTouchPointer(event)) return;
   if (event.button !== 0) return;
   eloPointerId = event.pointerId;
+  hasTouchedEloSlider = true;
   clearEloInteractionFailsafe();
   setEloFromClientX(event.clientX);
   showEloBubble(true);
@@ -3414,6 +2826,7 @@ eloSlider.addEventListener(
     const touch = event.touches[0];
     if (!touch) return;
     eloTouchId = touch.identifier;
+    hasTouchedEloSlider = true;
     clearEloInteractionFailsafe();
     setEloFromClientX(touch.clientX);
     showEloBubble(true);
@@ -3458,6 +2871,7 @@ eloSlider.addEventListener("input", () => {
   showEloBubble(isEloInteractionActive());
 });
 eloSlider.addEventListener("focus", () => {
+  hasTouchedEloSlider = true;
   updateEloDisplay();
   if (Date.now() >= suppressEloBubbleUntil) {
     showEloBubble(false);
@@ -3509,6 +2923,7 @@ eloBtn.addEventListener("click", async () => {
 
     userElo = elo;
     lastSubmittedElo = elo;
+    hasTouchedEloSlider = false;
     showToast(hadPrevious ? "Vote updated successfully" : "Voted successfully");
     updateEloDisplay();
   } catch (err) {
