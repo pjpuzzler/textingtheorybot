@@ -396,7 +396,7 @@ export function iqmToClassification(
     const forcedIqmShare =
       (iqmVoteMass.byClassification[Classification.FORCED] ?? 0) /
       iqmTotalVotes;
-    if (forcedIqmShare > 0.5 && -0.25 <= iqm && iqm < 0.25) {
+    if (forcedIqmShare > 0.75 && -0.25 <= iqm && iqm < 0.25) {
       return Classification.FORCED;
     }
 
