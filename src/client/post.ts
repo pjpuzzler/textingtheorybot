@@ -2359,7 +2359,8 @@ function getEloVoteTargetFromTitle(title?: string): EloSide | null {
 }
 
 function getDefaultEloVoteButtonLabel(): string {
-  const targetSide = postData?.eloSide ?? getEloVoteTargetFromTitle(postData?.title);
+  const targetSide =
+    postData?.eloSide ?? getEloVoteTargetFromTitle(postData?.title);
 
   if (targetSide === "left") return "Vote L";
   if (targetSide === "right" || targetSide === "me") return "Vote R";
@@ -2370,7 +2371,8 @@ function updateEloDisplay() {
   const val = Number(eloSlider.value);
   eloBubbleText.textContent = `${val} Elo`;
   updateEloBubblePosition();
-  const defaultLabel = userElo === null ? getDefaultEloVoteButtonLabel() : "Update";
+  const defaultLabel =
+    userElo === null ? getDefaultEloVoteButtonLabel() : "Update";
 
   if (isOwnPost()) {
     eloBtn.disabled = true;
