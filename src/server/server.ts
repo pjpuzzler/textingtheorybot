@@ -49,7 +49,7 @@ const NO_VOTES_FLAIR_TEXT = "No votes";
 const MIN_VOTER_ACCOUNT_AGE_DAYS = 7;
 const MIN_VOTER_TOTAL_KARMA = 10;
 const ON_APP_INSTALL_ENDPOINT = "/internal/triggers/on-app-install";
-const ANNOTATED_PREFIX = "[Annotated] ";
+const ON_POST_DELETE_ENDPOINT = "/internal/triggers/on-post-delete";
 const OTHER_ELO_LABEL_REGEX = /^[A-Za-z]{1,16}$/;
 const MODERATOR_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONSENSUS_CACHE_TTL_MS = 10 * 1000;
@@ -72,6 +72,7 @@ const votesKey = (pid: string, bid: string) => `tt:votes:${pid}:${bid}`;
 const userVotesKey = (pid: string, uid: string) => `tt:uservotes:${pid}:${uid}`;
 const eloVotesKey = (pid: string) => `tt:elo:${pid}`;
 const userEloKey = (pid: string, uid: string) => `tt:userelo:${pid}:${uid}`;
+const eligibleEloVotersKey = (pid: string) => `tt:elovoters:${pid}`;
 const eloFinalizedKey = (pid: string) => `tt:elo:finalized:${pid}`;
 const eloNoCountFlairAppliedKey = (pid: string) =>
   `tt:elo:finalized-nocount:v1:${pid}`;
@@ -296,6 +297,9 @@ async function onRequest(
     case ON_APP_INSTALL_ENDPOINT:
       body = await onAppInstall();
       break;
+    case ON_POST_DELETE_ENDPOINT:
+      body = await onPostDelete(req);
+      break;
     default:
       body = { error: "not found", status: 404 };
       break;
@@ -345,6 +349,16 @@ async function onAppInstall(): Promise<{
   return { type: "app-install", created: true, postUrl: post.url };
 }
 
+async function onPostDelete(req: IncomingMessage): Promise<{ type: string }> {
+  const event = await readJSON<{
+    postId?: string;
+    subreddit?: { name?: string };
+  }>(req);
+
+  await cleanupDeletedPostData(event.postId, event.subreddit?.name);
+  return { type: "post-delete" };
+}
+
 // ============================
 // Helpers
 // ============================
@@ -373,6 +387,10 @@ function toPostFullname(postId: string): `t3_${string}` {
   return (postId.startsWith("t3_") ? postId : `t3_${postId}`) as `t3_${string}`;
 }
 
+function normalizeStoredPostId(postId: string): string {
+  return postId.startsWith("t3_") ? postId.slice(3) : postId;
+}
+
 function postIdFromUrl(postUrl: string): string | null {
   const match = postUrl.match(/\/comments\/([a-z0-9]+)\//i);
   return match?.[1] ?? null;
@@ -393,6 +411,127 @@ async function applyCustomPostStylesFromUrl(postUrl: string): Promise<void> {
   const postId = postIdFromUrl(postUrl);
   if (!postId) return;
   await applyCustomPostStyles(postId);
+}
+
+async function clearInstallPostPointerIfMatching(
+  postId: string,
+  subredditName?: string,
+): Promise<void> {
+  if (!subredditName) return;
+
+  const installKey = `tt:install-post:${subredditName}`;
+  const installPostUrl = await redis.get(installKey);
+  if (!installPostUrl) return;
+
+  const installPostId = postIdFromUrl(installPostUrl);
+  if (!installPostId) return;
+  if (normalizeStoredPostId(installPostId) !== normalizeStoredPostId(postId)) {
+    return;
+  }
+
+  await redis.del(installKey);
+}
+
+async function resolveManagedPostId(postId: string): Promise<string | null> {
+  const normalizedPostId = normalizeStoredPostId(postId);
+  const candidates = Array.from(
+    new Set([postId, normalizedPostId, toPostFullname(normalizedPostId)]),
+  );
+  const storedPostData = await Promise.all(
+    candidates.map(async (candidate) => ({
+      candidate,
+      raw: await redis.get(postKey(candidate)),
+    })),
+  );
+
+  for (const entry of storedPostData) {
+    if (entry.raw) {
+      return entry.candidate;
+    }
+  }
+
+  return null;
+}
+
+async function cleanupDeletedPostData(
+  postId?: string,
+  subredditName?: string,
+): Promise<void> {
+  if (!postId) return;
+
+  const managedPostId = await resolveManagedPostId(postId);
+  if (!managedPostId) {
+    await clearInstallPostPointerIfMatching(postId, subredditName);
+    return;
+  }
+
+  const rawPostData = await redis.get(postKey(managedPostId));
+  let storedPostData: PostData | null = null;
+  if (rawPostData) {
+    try {
+      storedPostData = normalizePostData(JSON.parse(rawPostData) as PostData);
+    } catch {
+      storedPostData = null;
+    }
+  }
+
+  const badgeIds = storedPostData
+    ? Array.from(
+        new Set(
+          storedPostData.images.flatMap((image) =>
+            image.placements.map((placement) => placement.id),
+          ),
+        ),
+      )
+    : [];
+
+  const [eligibleEloVoters, badgeVoters] = await Promise.all([
+    redis.hKeys(eligibleEloVotersKey(managedPostId)),
+    Promise.all(
+      badgeIds.map(async (badgeId) =>
+        redis.hKeys(votesKey(managedPostId, badgeId)),
+      ),
+    ),
+  ]);
+
+  const badgeVoteUserIds = new Set<string>();
+  const eloVoteUserIds = new Set<string>(eligibleEloVoters);
+
+  for (const voterIds of badgeVoters) {
+    for (const userId of voterIds) {
+      badgeVoteUserIds.add(userId);
+    }
+  }
+
+  const keysToDelete = new Set<string>([
+    postKey(managedPostId),
+    eligibleEloVotersKey(managedPostId),
+    eloVotesKey(managedPostId),
+    eloFinalizedKey(managedPostId),
+    eloNoCountFlairAppliedKey(managedPostId),
+    consensusCacheKey(managedPostId, true),
+    consensusCacheKey(managedPostId, false),
+    consensusCacheMetaKey(managedPostId, true),
+    consensusCacheMetaKey(managedPostId, false),
+  ]);
+
+  for (const badgeId of badgeIds) {
+    keysToDelete.add(votesKey(managedPostId, badgeId));
+  }
+
+  for (const userId of badgeVoteUserIds) {
+    keysToDelete.add(userVotesKey(managedPostId, userId));
+  }
+
+  for (const userId of eloVoteUserIds) {
+    keysToDelete.add(userEloKey(managedPostId, userId));
+  }
+
+  if (keysToDelete.size > 0) {
+    await redis.del(...keysToDelete);
+  }
+
+  await clearInstallPostPointerIfMatching(managedPostId, subredditName);
 }
 
 function getUserId(): string {
@@ -1206,11 +1345,7 @@ async function onCreatePost(
     });
   }
 
-  const baseTitle = body.title || "Texting Theory";
-  const title =
-    body.mode === "annotated" && !baseTitle.startsWith(ANNOTATED_PREFIX)
-      ? `${ANNOTATED_PREFIX}${baseTitle}`
-      : baseTitle;
+  const title = body.title || "Texting Theory";
   const subredditName = context.subredditName ?? "TextingTheory";
   let postId = "";
   let postUrl = "";
@@ -1463,10 +1598,10 @@ async function onVoteElo(req: IncomingMessage): Promise<VoteEloResponse> {
   await redis.set(userEloKey(postId, userId), String(elo));
 
   // Only eligible votes are counted
-  const allEloVoters = await redis.hGetAll(`tt:elovoters:${postId}`);
+  const allEloVoters = await redis.hGetAll(eligibleEloVotersKey(postId));
   if (eligible) {
     allEloVoters[userId] = String(elo);
-    await redis.hSet(`tt:elovoters:${postId}`, { [userId]: String(elo) });
+    await redis.hSet(eligibleEloVotersKey(postId), { [userId]: String(elo) });
   }
 
   const eloArr = Object.values(allEloVoters).map(Number);

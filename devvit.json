@@ -51,7 +51,8 @@
     "entry": "index.js"
   },
   "triggers": {
-    "onAppInstall": "/internal/triggers/on-app-install"
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onPostDelete": "/internal/triggers/on-post-delete"
   },
   "scripts": {
     "dev": "node --experimental-strip-types ./tools/build.ts --watch",

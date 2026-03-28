@@ -956,6 +956,7 @@ html.tt-edit-boot #overlay-submit {
   background-repeat: no-repeat;
   background-position: center;
   position: relative;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .pk-label {

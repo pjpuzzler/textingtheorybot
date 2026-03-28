@@ -13,6 +13,7 @@ import {
   MAX_POST_AGE_TO_VOTE_MS,
   MIN_ELO,
   MAX_ELO,
+  type EloSide,
   type InitResponse,
   type BadgeVoteOption,
   type BadgeConsensus,
@@ -2343,11 +2344,33 @@ function updateGmTickPosition() {
   eloGmTick.style.left = `${x}px`;
 }
 
+function getEloVoteTargetFromTitle(title?: string): EloSide | null {
+  if (!title) return null;
+  const match = title.match(/^\[([^\]]+)\]/);
+  if (!match) return null;
+
+  const targetText = match[1];
+  if (!targetText) return null;
+  const target = targetText.trim().toLowerCase();
+  if (target === "left") return "left";
+  if (target === "right") return "right";
+  if (target === "me") return "me";
+  return "other";
+}
+
+function getDefaultEloVoteButtonLabel(): string {
+  const targetSide = postData?.eloSide ?? getEloVoteTargetFromTitle(postData?.title);
+
+  if (targetSide === "left") return "Vote L";
+  if (targetSide === "right" || targetSide === "me") return "Vote R";
+  return "Vote";
+}
+
 function updateEloDisplay() {
   const val = Number(eloSlider.value);
   eloBubbleText.textContent = `${val} Elo`;
   updateEloBubblePosition();
-  const defaultLabel = userElo === null ? "Vote" : "Update";
+  const defaultLabel = userElo === null ? getDefaultEloVoteButtonLabel() : "Update";
 
   if (isOwnPost()) {
     eloBtn.disabled = true;

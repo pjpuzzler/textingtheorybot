@@ -53,6 +53,8 @@ const VOTE_MAX_RADIUS = 5.8;
 const ANNOTATED_MIN_RADIUS = 2.7;
 const ANNOTATED_MAX_RADIUS = 5.8;
 const ANNOTATED_EXPORT_MIN_LONG_SIDE = 1280;
+const BADGE_DROP_SHADOW_OFFSET_PX = 2;
+const BADGE_DROP_SHADOW_ALPHA = 0.2;
 const REDACTION_STROKE_WIDTH_PCT = 1.25;
 const PAGE_SLIDE_DURATION_MS = 210;
 const SWIPE_COMMIT_MIN_PX = 48;
@@ -3021,10 +3023,6 @@ cmPost.addEventListener("click", async () => {
     return;
   }
 
-  if (mode === "annotated" && !title.startsWith("[Annotated] ")) {
-    title = `[Annotated] ${title}`;
-  }
-
   let effectiveSide: EloSide | undefined;
   let eloOtherText: string | undefined;
 
@@ -3491,6 +3489,10 @@ async function flattenAnnotatedImage(image: EditorImage): Promise<{
   const ordered = image.placements
     .slice()
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const shadowOffsetY = Math.max(
+    1,
+    (BADGE_DROP_SHADOW_OFFSET_PX * scaleBase) / ANNOTATED_EXPORT_MIN_LONG_SIDE,
+  );
 
   for (const placement of ordered) {
     if (!placement.classification) continue;
@@ -3500,6 +3502,11 @@ async function flattenAnnotatedImage(image: EditorImage): Promise<{
     const diameter = ((placement.radius || globalRadius) * 2 * scaleBase) / 100;
     const centerX = (placement.x / 100) * canvas.width;
     const centerY = (placement.y / 100) * canvas.height;
+    ctx.save();
+    ctx.shadowColor = `rgba(0, 0, 0, ${BADGE_DROP_SHADOW_ALPHA})`;
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = shadowOffsetY;
     ctx.drawImage(
       badge,
       centerX - diameter / 2,
@@ -3507,6 +3514,7 @@ async function flattenAnnotatedImage(image: EditorImage): Promise<{
       diameter,
       diameter,
     );
+    ctx.restore();
   }
 
   const mime = "image/png";
