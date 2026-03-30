@@ -693,9 +693,15 @@ function normalizePostData(postData: PostData): PostData {
 }
 
 function getAllPlacements(postData: PostData) {
-  return postData.images.flatMap((image, imageIndex) =>
-    image.placements.map((placement) => ({ placement, imageIndex })),
-  );
+  return postData.images
+    .flatMap((image, imageIndex) =>
+      image.placements.map((placement) => ({ placement, imageIndex })),
+    )
+    .sort(
+      (a, b) =>
+        (a.placement.order ?? 0) - (b.placement.order ?? 0) ||
+        a.imageIndex - b.imageIndex,
+    );
 }
 
 function isVoteWindowOpen(postData: PostData): boolean {
@@ -1160,28 +1166,10 @@ async function onInit(): Promise<InitResponse> {
       const placementList = getAllPlacements(postData).map(
         ({ placement }) => placement,
       );
-      const consensusEntries = await Promise.all(
-        placementList.map(async (placement) => {
-          const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
-          const computed = computeBadgeConsensus(allVotes);
-          if (
-            !voteWindowOpen &&
-            !computed.classification &&
-            computed.totalVotes > 0
-          ) {
-            computed.classification = iqmToClassification(
-              computed.iqm,
-              computed.voteCounts,
-              computed.totalVotes,
-            );
-          }
-          return [placement.id, computed] as const;
-        }),
+      Object.assign(
+        consensus,
+        await computeAllBadgeConsensus(postId, placementList, voteWindowOpen),
       );
-
-      for (const [placementId, computed] of consensusEntries) {
-        consensus[placementId] = computed;
-      }
 
       await writeConsensusCache(postId, voteWindowOpen, consensus);
     }
@@ -1498,16 +1486,11 @@ async function onVoteBadge(req: IncomingMessage): Promise<VoteBadgeResponse> {
   );
 
   // Recompute all consensus
-  const consensusEntries = await Promise.all(
-    allPlacements.map(async ({ placement: p }) => {
-      const allVotes = await redis.hGetAll(votesKey(postId, p.id));
-      return [p.id, computeBadgeConsensus(allVotes)] as const;
-    }),
+  const allConsensus = await computeAllBadgeConsensus(
+    postId,
+    allPlacements.map(({ placement }) => placement),
+    true,
   );
-  const allConsensus: Record<string, BadgeConsensus> = {};
-  for (const [badgeId, computed] of consensusEntries) {
-    allConsensus[badgeId] = computed;
-  }
 
   await clearConsensusCache(postId);
   await writeConsensusCache(postId, true, allConsensus);
@@ -1816,6 +1799,7 @@ async function applyAuthorEloFlair(
 // ============================
 function computeBadgeConsensus(
   allVotes: Record<string, string>,
+  bookSequenceIndex = 0,
 ): BadgeConsensus {
   const entries = Object.entries(allVotes);
   const totalVotes = entries.reduce(
@@ -1863,7 +1847,12 @@ function computeBadgeConsensus(
 
   let classification: Classification | null = null;
   if (totalVotes >= MIN_VOTES_FOR_BADGE_CONSENSUS) {
-    classification = iqmToClassification(iqm, voteCounts, totalVotes);
+    classification = iqmToClassification(
+      iqm,
+      voteCounts,
+      totalVotes,
+      bookSequenceIndex,
+    );
   }
 
   let result: ResultVote | null = null;
@@ -1908,4 +1897,35 @@ function computeBadgeConsensus(
     resultTotalVotes,
     resultVoteCounts,
   };
+}
+
+async function computeAllBadgeConsensus(
+  postId: string,
+  placementList: Array<{ id: string }>,
+  voteWindowOpen: boolean,
+): Promise<Record<string, BadgeConsensus>> {
+  const consensus: Record<string, BadgeConsensus> = {};
+  let consecutiveBookCount = 0;
+
+  for (const placement of placementList) {
+    const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
+    const computed = computeBadgeConsensus(allVotes, consecutiveBookCount);
+    if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+      computed.classification = iqmToClassification(
+        computed.iqm,
+        computed.voteCounts,
+        computed.totalVotes,
+        consecutiveBookCount,
+      );
+    }
+
+    consensus[placement.id] = computed;
+    if (computed.classification === Classification.BOOK) {
+      consecutiveBookCount += 1;
+    } else {
+      consecutiveBookCount = 0;
+    }
+  }
+
+  return consensus;
 }

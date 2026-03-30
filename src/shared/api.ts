@@ -345,6 +345,13 @@ export type ApiEndpoint = (typeof ApiEndpoint)[keyof typeof ApiEndpoint];
 export const INTERESTING_LOWER_BOUND: Classification = Classification.MISTAKE;
 export const INTERESTING_UPPER_BOUND: Classification = Classification.BEST;
 
+export function bookIqmShareThreshold(bookSequenceIndex: number): number {
+  const normalizedIndex = Math.max(0, Math.floor(bookSequenceIndex));
+  if (normalizedIndex === 0) return 0.5;
+  if (normalizedIndex === 1) return 0.375;
+  return 0.25;
+}
+
 /**
  * Interquartile Mean — trims 25% from each end, averages the middle 50%.
  * Uses a robust interquartile-mean approach to reduce outlier impact.
@@ -376,6 +383,7 @@ export function iqmToClassification(
   iqm: number,
   voteCounts: Partial<Record<Classification, number>>,
   totalVotes: number,
+  bookSequenceIndex = 0,
 ): Classification {
   const { q1, q3 } = interquartileWeightedBounds(voteCounts, totalVotes);
   const interestingLowerWeight = CLASSIFICATION_WEIGHT[INTERESTING_LOWER_BOUND];
@@ -389,7 +397,11 @@ export function iqmToClassification(
   if (iqmTotalVotes > 0) {
     const bookIqmShare =
       (iqmVoteMass.byClassification[Classification.BOOK] ?? 0) / iqmTotalVotes;
-    if (bookIqmShare > 0.5 && -0.25 <= iqm && iqm < 0.25) {
+    if (
+      bookIqmShare > bookIqmShareThreshold(bookSequenceIndex) &&
+      -0.25 <= iqm &&
+      iqm < 0.25
+    ) {
       return Classification.BOOK;
     }
 

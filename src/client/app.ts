@@ -1094,17 +1094,6 @@ function syncActivePlacementRadiiFromSlider(applyToPlacements = true): void {
   }
 }
 
-function startCreateCropFlow(): void {
-  if (!images.length) return;
-  suppressCreateCropCancelUntil = 0;
-  createCropFlowActive = true;
-  createCropFlowIndex = 0;
-  activeImageIndex = 0;
-  openEditor();
-  createModal.style.pointerEvents = "none";
-  openCropModalForActiveImage();
-}
-
 function cancelCreateCropFlow(): void {
   if (Date.now() < suppressCreateCropCancelUntil) {
     return;
@@ -1186,7 +1175,7 @@ fileInput.addEventListener("change", async () => {
 
   images = built;
   activeImageIndex = 0;
-  startCreateCropFlow();
+  openEditor();
 
   fileInput.value = "";
 });
