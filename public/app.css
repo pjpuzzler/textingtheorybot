@@ -128,6 +128,7 @@ html.tt-edit-boot #overlay-submit {
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .mode-name {

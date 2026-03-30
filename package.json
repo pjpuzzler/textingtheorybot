@@ -14,12 +14,12 @@
     "node": ">=22.6.0"
   },
   "dependencies": {
-    "@devvit/cli": "0.12.16",
-    "@devvit/public-api": "0.12.16",
-    "@devvit/web": "0.12.16",
+    "@devvit/cli": "0.12.17",
+    "@devvit/public-api": "0.12.17",
+    "@devvit/web": "0.12.17",
     "@google/genai": "latest",
     "@pinecone-database/pinecone": "latest",
-    "devvit": "0.12.16"
+    "devvit": "0.12.17"
   },
   "devDependencies": {
     "@types/node": "22.12.0",
