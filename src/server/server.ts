@@ -1910,7 +1910,11 @@ async function computeAllBadgeConsensus(
   for (const placement of placementList) {
     const allVotes = await redis.hGetAll(votesKey(postId, placement.id));
     const computed = computeBadgeConsensus(allVotes, consecutiveBookCount);
-    if (!voteWindowOpen && !computed.classification && computed.totalVotes > 0) {
+    if (
+      !voteWindowOpen &&
+      !computed.classification &&
+      computed.totalVotes > 0
+    ) {
       computed.classification = iqmToClassification(
         computed.iqm,
         computed.voteCounts,
