@@ -423,11 +423,11 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   z-index: 1;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
 }
 
 .badge-face--unlocked {
-  filter: saturate(67%) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+  filter: saturate(67%) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
 }
 
 .badge--placeholder,
@@ -552,7 +552,7 @@ body {
   background-position: center;
   pointer-events: none;
   z-index: 10;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
 }
 
 .elo {
@@ -958,7 +958,7 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   position: relative;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
 }
 
 .pk-label {

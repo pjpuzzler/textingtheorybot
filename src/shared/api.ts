@@ -348,7 +348,7 @@ export const INTERESTING_UPPER_BOUND: Classification = Classification.BEST;
 export function bookIqmShareThreshold(bookSequenceIndex: number): number {
   const normalizedIndex = Math.max(0, Math.floor(bookSequenceIndex));
   if (normalizedIndex === 0) return 0.5;
-  if (normalizedIndex === 1) return 0.375;
+  // if (normalizedIndex === 1) return 0.375;
   return 0.25;
 }
 
