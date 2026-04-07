@@ -423,11 +423,11 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   z-index: 1;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .badge-face--unlocked {
-  filter: saturate(67%) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: saturate(67%) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .badge--placeholder,
@@ -447,14 +447,14 @@ body {
   touch-action: manipulation;
 }
 
-.badge--ring::before {
+.badge--ring::before,
+.badge--ring-ghost::before {
   content: "";
   position: absolute;
-  inset: calc(var(--ring-width, 2px) * -1);
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  z-index: 2;
-  border: none;
+  inset: calc(var(--ring-width, 1.5px) * -1);
+  box-sizing: border-box;
+  border-radius: inherit;
+  padding: var(--ring-width, 1.5px);
   background: conic-gradient(
     from 180deg,
     #fa412d 0deg,
@@ -467,22 +467,22 @@ body {
     #26c2a3 332deg,
     #fa412d 360deg
   );
-  -webkit-mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
-  );
-  mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
-  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
   opacity: 1;
-  filter: none;
   animation: ring-spin 5.2s linear infinite;
   animation-delay: var(--ring-delay, 0s);
   will-change: transform;
   transform-origin: center center;
+}
+
+.badge--ring::before {
+  z-index: 2;
+  filter: none;
 }
 
 .badge--ring::after {
@@ -495,41 +495,6 @@ body {
 
 .badges--ghost .badge--ring::after {
   content: none;
-}
-
-.badge--ring-ghost::before {
-  content: "";
-  position: absolute;
-  inset: calc(var(--ring-width, 2px) * -1);
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  border: none;
-  background: conic-gradient(
-    from 180deg,
-    #fa412d 0deg,
-    #ff7769 38deg,
-    #ffa459 78deg,
-    #f7c631 118deg,
-    #95b776 168deg,
-    #81b64c 214deg,
-    #749bbf 274deg,
-    #26c2a3 332deg,
-    #fa412d 360deg
-  );
-  -webkit-mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
-  );
-  mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - var(--ring-width, 2px)),
-    #000 calc(100% - var(--ring-width, 2px))
-  );
-  opacity: 1;
-  animation: ring-spin 5.2s linear infinite;
-  animation-delay: var(--ring-delay, 0s);
-  transform-origin: center center;
 }
 
 @keyframes ring-spin {
@@ -552,7 +517,7 @@ body {
   background-position: center;
   pointer-events: none;
   z-index: 10;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .elo {
@@ -958,7 +923,7 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   position: relative;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .pk-label {

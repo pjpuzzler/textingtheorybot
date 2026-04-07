@@ -128,7 +128,7 @@ html.tt-edit-boot #overlay-submit {
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .mode-name {
@@ -441,7 +441,7 @@ html.tt-edit-boot #overlay-submit {
   transform: translate(-50%, -50%);
   pointer-events: auto;
   touch-action: none;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .cm-canvas-wrap.marker-mode .ed-badge,
@@ -957,7 +957,7 @@ html.tt-edit-boot #overlay-submit {
   background-repeat: no-repeat;
   background-position: center;
   position: relative;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .pk-label {
@@ -1151,7 +1151,7 @@ html.tt-edit-boot #overlay-submit {
   background-repeat: no-repeat;
   background-position: center;
   border: 1px solid color-mix(in srgb, var(--tt-accent-bg) 55%, transparent);
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
 }
 
 .crop-marker-toggle {
